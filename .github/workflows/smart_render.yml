@@ -1,4 +1,4 @@
-name: Viral_Video_Generator_v30
+name: Viral_Video_Cinematic_v31
 on:
   repository_dispatch:
     types: [start_smart_render]
@@ -34,22 +34,29 @@ jobs:
               except: pass
               return False
 
-          def generate_action_visual(prompt, idx):
-              # Adding 'Generate' and 'Cinematic Action' logic as requested
-              refined_prompt = f"Generate cinematic action visual, 4k, hyper-realistic, high motion, {prompt}"
-              encoded = urllib.parse.quote(refined_prompt)
+          def get_visual(prompt, idx):
+              # Cleaning prompt: Remove numbers and technical prefixes to get the core visual description
+              clean_p = re.sub(r'^\d+\.\s*', '', prompt) # Remove "1. "
+              clean_p = clean_p.replace("Generate cinematic viral video 6 seconds of", "").strip()
+              
+              # Adding cinematic quality keywords
+              refined = f"4k, cinematic lighting, high-end luxury production, masterpiece, {clean_p}"
+              encoded = urllib.parse.quote(refined)
               url = f"https://pollinations.ai/p/{encoded}?width=1080&height=1920&seed={idx}&model=flux"
-              if download_media(url, f"frame_{idx}.jpg"):
-                  return f"frame_{idx}.jpg"
+              
+              if download_media(url, f"scene_{idx}.jpg"):
+                  return f"scene_{idx}.jpg"
               return None
 
           try:
               raw_prompts = "${{ github.event.client_payload.visual_prompts }}"
-              prompts = [p.strip() for p in raw_prompts.split('|') if len(p.strip()) > 5]
+              # Splitting by pipe and removing whitespace/newlines
+              prompts = [p.strip() for p in raw_prompts.split('|') if len(p.strip()) > 10]
+              
               audio_url = "${{ github.event.client_payload.audio_url }}"
               audio_id = re.search(r'id=([a-zA-Z0-9_-]+)', audio_url).group(1)
               
-              # Audio Setup
+              print("Downloading audio...")
               audio_link = f"https://docs.google.com/uc?export=download&id={audio_id}"
               download_media(audio_link, "audio.mp3")
               audio = AudioFileClip("audio.mp3")
@@ -57,17 +64,17 @@ jobs:
               
               clips = []
               for i, p in enumerate(prompts):
-                  print(f"Generating Scene {i+1}...")
-                  img_path = generate_action_visual(p, i)
+                  print(f"Executing: {p[:50]}...")
+                  img_path = get_visual(p, i)
                   
                   if img_path and os.path.exists(img_path):
-                      # Create Cinematic Image Layer
+                      # Create Cinematic Layer from generated image
                       img_clip = ImageClip(img_path).set_duration(dur).set_fps(24)
-                      # Apply Action Zoom
+                      # Applying Action Zoom (0.1 growth rate for high-end feel)
                       img_clip = img_clip.resize(lambda t: 1 + 0.1 * t).set_position('center')
                       
-                      # Professional Text Overlay
-                      txt = TextClip(p, fontsize=50, color='white', font='Arial-Bold', size=(900, 1600), method='caption').set_duration(dur).set_fps(24)
+                      # Subtle Text Overlay
+                      txt = TextClip(p, fontsize=45, color='white', font='Arial-Bold', size=(900, 1600), method='caption').set_duration(dur).set_fps(24)
                       
                       scene = CompositeVideoClip([img_clip, txt.set_position(('center', 1400))])
                       clips.append(scene)
@@ -77,7 +84,7 @@ jobs:
                   final.write_videofile("production_video.mp4", codec="libx264", audio_codec="aac", fps=24, threads=4)
                   print("RENDER_SUCCESS")
           except Exception as e:
-              print(f"Error: {e}")
+              print(f"Error Log: {e}")
           EOF
 
       - name: Save_Video_File
@@ -93,4 +100,4 @@ jobs:
         run: |
           curl -X POST "${{ github.event.client_payload.callback_url }}" \
           -H "Content-Type: application/json" \
-          -d "{\"status\": \"finished\", \"info\": \"Action Video with Visuals Ready\"}" || true
+          -d "{\"status\": \"finished\", \"info\": \"v31 Cinematic Render Complete\"}" || true
