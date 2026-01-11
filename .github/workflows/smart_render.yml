@@ -1,6 +1,3 @@
-/* --- PART 1: GitHub Action (smart_render.yml) --- */
-/* Replace the entire content of your .github/workflows/smart_render.yml with this */
-
 name: Viral_Video_Engine_v8
 on:
   repository_dispatch:
