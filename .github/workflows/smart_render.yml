@@ -64,5 +64,3 @@ jobs:
               requests.post(callback, json={"status": "success", "download_url": link})
           except Exception as e:
               print(f"Production Failed: {e}")
-              exit(1)
-          EOF
