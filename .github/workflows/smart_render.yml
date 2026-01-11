@@ -1,4 +1,4 @@
-name: Viral_Video_Engine_v13_Final
+name: Viral_Video_Engine_v14
 on:
   repository_dispatch:
     types: [start_smart_render]
@@ -11,15 +11,13 @@ jobs:
       - uses: actions/setup-python@v4
         with:
           python-version: '3.9'
-      - name: System_Setup
+      - name: Setup
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg imagemagick
-          # Unlock ImageMagick for TextClip
           sudo find /etc/ImageMagick* -name "policy.xml" -exec sed -i 's/policy domain="path" rights="none" pattern="@\*"/policy domain="path" rights="read|write" pattern="@\*"/g' {} +
-          # Fix for PIL.Image.ANTIALIAS error
           pip install "Pillow<10.0.0" moviepy==1.0.3 requests
-      - name: Production_Engine
+      - name: Render
         run: |
           python - <<EOF
           import os, requests, re
@@ -43,19 +41,18 @@ jobs:
               audio_id = re.search(r'id=([a-zA-Z0-9_-]+)', audio_url).group(1)
               callback = "${{ github.event.client_payload.callback_url }}"
               
-              print("Downloading 70s audio...")
               download_drive(audio_id, "audio.mp3")
               audio = AudioFileClip("audio.mp3")
-              
               dur = audio.duration / len(prompts)
-              print(f"Rendering 10 scenes, duration per scene: {dur}s")
               
-              clips = [TextClip(p, fontsize=48, color='white', font='Arial-Bold', size=(1080,1920), method='caption').set_duration(dur).set_fps(24).resize(lambda t: 1 + 0.04 * t) for p in prompts]
+              clips = [TextClip(p, fontsize=50, color='white', font='Arial-Bold', size=(1080,1920), method='caption').set_duration(dur).set_fps(24).resize(lambda t: 1 + 0.04 * t) for p in prompts]
               
               final = concatenate_videoclips(clips, method="compose").set_audio(audio)
               final.write_videofile("final_video.mp4", codec="libx264", audio_codec="aac", fps=24, threads=4)
               
-              link = os.popen("curl --upload-file ./final_video.mp4 https://bashupload.com/viral_final_v13.mp4").read().strip()
+              # Using file.io for more stability
+              res = os.popen("curl -F 'file=@final_video.mp4' https://file.io").read()
+              link = re.search(r'"link":"(https://file.io/[a-zA-Z0-9]+)"', res).group(1)
               print(f"\n\nSUCCESS! DOWNLOAD LINK: {link}\n\n")
               
               requests.post(callback, json={"status": "success", "download_url": link})
