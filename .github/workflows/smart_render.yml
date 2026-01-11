@@ -1,48 +1,60 @@
-name: Smart_Video_Agent
+name: Viral_AI_Video_Engine_v7
 on:
   repository_dispatch:
     types: [start_smart_render]
 
 jobs:
-  render_process:
+  build_video:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout_Repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup_Tools
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg curl
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
 
-      - name: Process_Video
+      - name: Install Dependencies
         run: |
-          mkdir -p workspace
-          IMAGE_LIST="${{ github.event.client_payload.image_urls }}"
-          AUDIO_URL="${{ github.event.client_payload.audio_url }}"
-          
-          # Download images and create a manifest for FFmpeg
-          IFS=',' read -ra ADDR <<< "$IMAGE_LIST"
-          index=0
-          for url in "${ADDR[@]}"; do
-            if [ ! -z "$url" ]; then
-              curl -L -o "workspace/img_$index.png" "$url"
-              echo "file 'workspace/img_$index.png'" >> images.txt
-              echo "duration 3" >> images.txt
-              ((index++))
-            fi
-          done
-          # FFmpeg needs the last image repeated without duration
-          echo "file 'workspace/img_$((index-1)).png'" >> images.txt
-          
-          curl -L -o "workspace/audio.mp3" "$AUDIO_URL"
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          pip install moviepy requests
 
-          # Render using the manifest file (Much more stable)
-          ffmpeg -f concat -safe 0 -i images.txt -i workspace/audio.mp3 \
-          -c:v libx264 -pix_fmt yuv420p -t 18 -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920" \
-          -y final_output.mp4
+      - name: Viral_Production_Script
+        run: |
+          python - <<EOF
+          import os
+          import requests
+          from moviepy.editor import ColorClip, TextClip, AudioFileClip, concatenate_videoclips, CompositeVideoClip
+          
+          # 1. Get data from n8n
+          visual_prompts = "${{ github.event.client_payload.visual_prompts }}".split('|')
+          audio_url = "${{ github.event.client_payload.audio_url }}"
+          
+          # 2. Download Assets
+          os.system(f"curl -L -o audio.mp3 '{audio_url}'")
+          audio = AudioFileClip("audio.mp3")
+          
+          # 3. Process 10 scenes
+          clips = []
+          duration = audio.duration / len(visual_prompts)
+          for i, prompt in enumerate(visual_prompts):
+              # Creating dynamic cinematic slides with prompts
+              txt_clip = TextClip(prompt, fontsize=40, color='white', size=(1080, 1920), method='caption')
+              txt_clip = txt_clip.set_duration(duration).set_fps(24)
+              txt_clip = txt_clip.resize(lambda t: 1 + 0.02 * t) # Ken Burns Effect
+              clips.append(txt_clip)
+          
+          # 4. Final Assembly
+          final_visuals = concatenate_videoclips(clips, method="compose")
+          final_video = final_visuals.set_audio(audio)
+          final_video.write_videofile("final_viral_video.mp4", codec="libx264", audio_codec="aac", fps=24)
+          EOF
 
       - name: Upload_and_Callback
         run: |
-          VIDEO_URL=$(curl --upload-file ./final_output.mp4 https://bashupload.com/final_video.mp4)
+          VIDEO_URL=$(curl --upload-file ./final_viral_video.mp4 https://bashupload.com/viral_final.mp4)
           curl -L -X POST "${{ github.event.client_payload.callback_url }}" \
           -H "Content-Type: application/json" \
           -d "{\"status\": \"success\", \"download_url\": \"$VIDEO_URL\"}"
