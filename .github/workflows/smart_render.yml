@@ -15,7 +15,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg jq curl
 
-      - name: Download_Assets_and_Build
+      - name: Robust_Download_and_Build
         run: |
           mkdir -p workspace
           IMAGE_LIST="${{ github.event.client_payload.image_urls }}"
@@ -24,18 +24,26 @@ jobs:
           IFS=',' read -ra ADDR <<< "$IMAGE_LIST"
           index=0
           for url in "${ADDR[@]}"; do
-            curl -L -o "workspace/img_$index.png" "$url"
-            echo "Downloaded: img_$index.png"
-            ((index++))
+            if [ ! -z "$url" ]; then
+              echo "Attempting to download Image $index..."
+              curl -L -C - -o "workspace/img_$index.png" "$url" || echo "Warning: Download failed for img_$index"
+              ((index++))
+            fi
           done
           
-          curl -L -o "workspace/audio.mp3" "$AUDIO_URL"
+          echo "Downloading Audio..."
+          curl -L -o "workspace/audio.mp3" "$AUDIO_URL" || echo "Audio download failed"
 
-          # Render: 9:16 Vertical, 3s per image
-          ffmpeg -framerate 1/3 -i workspace/img_%d.png -i workspace/audio.mp3 \
-          -c:v libx264 -t 18 -pix_fmt yuv420p \
-          -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920" \
-          -y final_output.mp4
+          if [ -f "workspace/img_0.png" ]; then
+            echo "Starting FFmpeg Render..."
+            ffmpeg -framerate 1/3 -i workspace/img_%d.png -i workspace/audio.mp3 \
+            -c:v libx264 -t 18 -pix_fmt yuv420p \
+            -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920" \
+            -y final_output.mp4
+          else
+            echo "Error: No images found"
+            exit 1
+          fi
 
       - name: Save_Final_Video
         uses: actions/upload-artifact@v4
