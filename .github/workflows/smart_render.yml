@@ -1,4 +1,4 @@
-name: Viral_AI_Video_Engine_v7
+name: Viral_Video_Engine_v7
 on:
   repository_dispatch:
     types: [start_smart_render]
@@ -7,7 +7,7 @@ jobs:
   build_video:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -15,46 +15,63 @@ jobs:
         with:
           python-version: '3.9'
 
-      - name: Install Dependencies
+      - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
-          pip install moviepy requests
+          sudo apt-get install -y ffmpeg imagemagick
+          # Fix for ImageMagick security policy
+          sudo sed -i 's/policy domain="path" rights="none" pattern="@\*"/policy domain="path" rights="read|write" pattern="@\*"/g' /etc/ImageMagick-6/policy.xml
 
-      - name: Viral_Production_Script
+      - name: Install Python Libraries
+        run: |
+          pip install moviepy==1.0.3 requests
+
+      - name: Execute Production Script
         run: |
           python - <<EOF
           import os
           import requests
-          from moviepy.editor import ColorClip, TextClip, AudioFileClip, concatenate_videoclips, CompositeVideoClip
+          from moviepy.editor import TextClip, AudioFileClip, concatenate_videoclips
           
-          # 1. Get data from n8n
-          visual_prompts = "${{ github.event.client_payload.visual_prompts }}".split('|')
-          audio_url = "${{ github.event.client_payload.audio_url }}"
-          
-          # 2. Download Assets
-          os.system(f"curl -L -o audio.mp3 '{audio_url}'")
-          audio = AudioFileClip("audio.mp3")
-          
-          # 3. Process 10 scenes
-          clips = []
-          duration = audio.duration / len(visual_prompts)
-          for i, prompt in enumerate(visual_prompts):
-              # Creating dynamic cinematic slides with prompts
-              txt_clip = TextClip(prompt, fontsize=40, color='white', size=(1080, 1920), method='caption')
-              txt_clip = txt_clip.set_duration(duration).set_fps(24)
-              txt_clip = txt_clip.resize(lambda t: 1 + 0.02 * t) # Ken Burns Effect
-              clips.append(txt_clip)
-          
-          # 4. Final Assembly
-          final_visuals = concatenate_videoclips(clips, method="compose")
-          final_video = final_visuals.set_audio(audio)
-          final_video.write_videofile("final_viral_video.mp4", codec="libx264", audio_codec="aac", fps=24)
-          EOF
+          try:
+              # 1. Extraction
+              raw_prompts = "${{ github.event.client_payload.visual_prompts }}"
+              visual_prompts = [p.strip() for p in raw_prompts.split('|') if p.strip()]
+              audio_url = "${{ github.event.client_payload.audio_url }}"
+              callback_url = "${{ github.event.client_payload.callback_url }}"
+              
+              # 2. Audio Processing
+              print("Downloading audio...")
+              r = requests.get(audio_url, allow_redirects=True)
+              with open("input_audio.mp3", "wb") as f:
+                  f.write(r.content)
+              
+              audio = AudioFileClip("input_audio.mp3")
+              duration_per_clip = audio.duration / len(visual_prompts)
+              
+              # 3. Visual Rendering
+              print(f"Rendering {len(visual_prompts)} scenes...")
+              clips = []
+              for p in visual_prompts:
+                  txt = TextClip(p, fontsize=50, color='white', size=(1080, 1920), method='caption', align='Center')
+                  txt = txt.set_duration(duration_per_clip).set_fps(24)
+                  # Apply Ken Burns Effect (Slow Zoom)
+                  txt = txt.resize(lambda t: 1 + 0.03 * t)
+                  clips.append(txt)
+              
+              # 4. Final Mixing
+              print("Finalizing video...")
+              final_video = concatenate_videoclips(clips, method="compose").set_audio(audio)
+              final_video.write_videofile("output_viral.mp4", codec="libx264", audio_codec="aac", fps=24)
+              
+              # 5. Success Callback
+              video_link = os.popen("curl --upload-file ./output_viral.mp4 https://bashupload.com/viral_video.mp4").read().strip()
+              requests.post(callback_url, json={"status": "success", "download_url": video_link})
+              print("Process completed successfully.")
 
-      - name: Upload_and_Callback
-        run: |
-          VIDEO_URL=$(curl --upload-file ./final_viral_video.mp4 https://bashupload.com/viral_final.mp4)
-          curl -L -X POST "${{ github.event.client_payload.callback_url }}" \
-          -H "Content-Type: application/json" \
-          -d "{\"status\": \"success\", \"download_url\": \"$VIDEO_URL\"}"
+          except Exception as e:
+              print(f"Error: {str(e)}")
+              if 'callback_url' in locals():
+                  requests.post(callback_url, json={"status": "failed", "error": str(e)})
+              exit(1)
+          EOF
