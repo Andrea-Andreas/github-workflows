@@ -1,4 +1,4 @@
-name: Viral_Video_Engine_v7
+name: Viral_Video_Engine_v7_Final
 on:
   repository_dispatch:
     types: [start_smart_render]
@@ -7,76 +7,53 @@ jobs:
   build_video:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repository
+      - name: Checkout
         uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
-
-      - name: Install System Dependencies
+      - name: Install Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg imagemagick
-          # Critical fix for ImageMagick security policy to allow TextClip
           sudo sed -i 's/policy domain="path" rights="none" pattern="@\*"/policy domain="path" rights="read|write" pattern="@\*"/g' /etc/ImageMagick-6/policy.xml
-
-      - name: Install Python Libraries
-        run: |
           pip install moviepy==1.0.3 requests
-
-      - name: Execute Production Script
+      - name: Production
         run: |
           python - <<EOF
-          import os
-          import requests
+          import os, requests, time
           from moviepy.editor import TextClip, AudioFileClip, concatenate_videoclips
           
           try:
-              # 1. Extraction from n8n payload
-              raw_prompts = "${{ github.event.client_payload.visual_prompts }}"
-              visual_prompts = [p.strip() for p in raw_prompts.split('|') if p.strip()]
+              # 1. Extraction
+              prompts = "${{ github.event.client_payload.visual_prompts }}".split('|')
               audio_url = "${{ github.event.client_payload.audio_url }}"
-              callback_url = "${{ github.event.client_payload.callback_url }}"
+              callback = "${{ github.event.client_payload.callback_url }}"
               
-              # 2. Audio Processing
-              print("Downloading 70s audio...")
-              r = requests.get(audio_url, allow_redirects=True)
-              with open("input_audio.mp3", "wb") as f:
-                  f.write(r.content)
+              # 2. Assets
+              os.system(f"curl -L -o a.mp3 '{audio_url}'")
+              audio = AudioFileClip("a.mp3")
               
-              audio = AudioFileClip("input_audio.mp3")
-              # Calculate duration for each of the 10 scenes
-              duration_per_clip = audio.duration / len(visual_prompts)
+              # 3. Rendering
+              dur = audio.duration / len(prompts)
+              clips = [TextClip(p, fontsize=50, color='white', size=(1080,1920), method='caption').set_duration(dur).set_fps(24).resize(lambda t: 1 + 0.03 * t) for p in prompts]
               
-              # 3. Visual Rendering
-              print(f"Generating {len(visual_prompts)} scenes...")
-              clips = []
-              for p in visual_prompts:
-                  # Create cinematic slides using the prompts
-                  txt = TextClip(p, fontsize=50, color='white', size=(1080, 1920), method='caption', align='Center')
-                  txt = txt.set_duration(duration_per_clip).set_fps(24)
-                  # Ken Burns Zoom Effect
-                  txt = txt.resize(lambda t: 1 + 0.04 * t)
-                  clips.append(txt)
+              final = concatenate_videoclips(clips, method="compose").set_audio(audio)
+              final.write_videofile("out.mp4", codec="libx264", audio_codec="aac", fps=24)
               
-              # 4. Final Assembly
-              print("Mixing audio and visual layers...")
-              final_video = concatenate_videoclips(clips, method="compose").set_audio(audio)
-              final_video.write_videofile("output_viral.mp4", codec="libx264", audio_codec="aac", fps=24)
+              # 4. Upload
+              link = os.popen("curl --upload-file ./out.mp4 https://bashupload.com/viral_video.mp4").read().strip()
+              print(f"\n\nFINAL VIDEO LINK: {link}\n\n")
               
-              # 5. Uploading result
-              print("Uploading to temporary host...")
-              video_link = os.popen("curl --upload-file ./output_viral.mp4 https://bashupload.com/viral_video_v7.mp4").read().strip()
-              
-              # Success Callback to n8n
-              requests.post(callback_url, json={"status": "success", "download_url": video_link})
-              print(f"Video ready: {video_link}")
-
+              # 5. Callback with Retry
+              for i in range(3):
+                  try:
+                      res = requests.post(callback, json={"status": "success", "download_url": link}, timeout=10)
+                      if res.status_code == 200: break
+                  except:
+                      time.sleep(5)
           except Exception as e:
-              print(f"Production failed: {str(e)}")
-              if 'callback_url' in locals():
-                  requests.post(callback_url, json={"status": "failed", "error": str(e)})
+              print(f"Error: {e}")
               exit(1)
           EOF
