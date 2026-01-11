@@ -86,7 +86,6 @@ jobs:
           except Exception as e:
               print(f"Error: {e}")
               sys.exit(1)
-          EOF
 
       - name: Save_4K_Artifact
         if: always()
