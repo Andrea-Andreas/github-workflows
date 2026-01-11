@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout_Repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup_FFmpeg_and_Tools
         run: |
@@ -18,8 +18,6 @@ jobs:
       - name: Download_Assets_and_Build
         run: |
           mkdir -p workspace
-          
-          # Convert comma-separated URLs to array
           IMAGE_LIST="${{ github.event.client_payload.image_urls }}"
           AUDIO_URL="${{ github.event.client_payload.audio_url }}"
           
@@ -33,14 +31,14 @@ jobs:
           
           curl -L -o "workspace/audio.mp3" "$AUDIO_URL"
 
-          # FFmpeg Render: Vertical 9:16, 3 seconds per frame
+          # Render: 9:16 Vertical, 3s per image
           ffmpeg -framerate 1/3 -i workspace/img_%d.png -i workspace/audio.mp3 \
           -c:v libx264 -t 18 -pix_fmt yuv420p \
           -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920" \
           -y final_output.mp4
 
       - name: Save_Final_Video
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: generated_video_file
           path: final_output.mp4
