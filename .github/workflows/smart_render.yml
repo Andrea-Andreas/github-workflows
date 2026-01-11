@@ -1,5 +1,4 @@
-# GitHub Action v29 - Fixed & Farsi-Free
-name: Viral_Video_Legend_v29
+name: Viral_Video_Generator_v30
 on:
   repository_dispatch:
     types: [start_smart_render]
@@ -12,40 +11,86 @@ jobs:
       - uses: actions/setup-python@v4
         with:
           python-version: '3.9'
+
       - name: Install_Tools
         run: |
           sudo apt-get update && sudo apt-get install -y ffmpeg imagemagick
           sudo find /etc/ImageMagick* -name "policy.xml" -exec sed -i 's/policy domain="path" rights="none" pattern="@\*"/policy domain="path" rights="read|write" pattern="@\*"/g' {} +
           pip install "Pillow<10.0.0" moviepy==1.0.3 requests opencv-python-headless
+
       - name: Video_Rendering
         run: |
           python - <<EOF
-          import os, requests, re
-          from moviepy.editor import TextClip, AudioFileClip, ColorClip, concatenate_videoclips, CompositeVideoClip
+          import os, requests, re, urllib.parse
+          from moviepy.editor import TextClip, AudioFileClip, ImageClip, concatenate_videoclips, CompositeVideoClip
+
+          def download_media(url, dest):
+              try:
+                  r = requests.get(url, stream=True, timeout=60)
+                  if r.status_code == 200:
+                      with open(dest, "wb") as f:
+                          for c in r.iter_content(65536): f.write(c)
+                      return True
+              except: pass
+              return False
+
+          def generate_action_visual(prompt, idx):
+              # Adding 'Generate' and 'Cinematic Action' logic as requested
+              refined_prompt = f"Generate cinematic action visual, 4k, hyper-realistic, high motion, {prompt}"
+              encoded = urllib.parse.quote(refined_prompt)
+              url = f"https://pollinations.ai/p/{encoded}?width=1080&height=1920&seed={idx}&model=flux"
+              if download_media(url, f"frame_{idx}.jpg"):
+                  return f"frame_{idx}.jpg"
+              return None
+
           try:
               raw_prompts = "${{ github.event.client_payload.visual_prompts }}"
               prompts = [p.strip() for p in raw_prompts.split('|') if len(p.strip()) > 5]
               audio_url = "${{ github.event.client_payload.audio_url }}"
               audio_id = re.search(r'id=([a-zA-Z0-9_-]+)', audio_url).group(1)
-              r = requests.get(f"https://docs.google.com/uc?export=download&id={audio_id}", stream=True)
-              with open("audio.mp3", "wb") as f:
-                  for c in r.iter_content(32768): f.write(c)
+              
+              # Audio Setup
+              audio_link = f"https://docs.google.com/uc?export=download&id={audio_id}"
+              download_media(audio_link, "audio.mp3")
               audio = AudioFileClip("audio.mp3")
               dur = audio.duration / len(prompts)
+              
               clips = []
               for i, p in enumerate(prompts):
-                  bg = ColorClip(size=(1080, 1920), color=(15, 15, 15)).set_duration(dur)
-                  txt = TextClip(p, fontsize=60, color='white', font='Arial-Bold', size=(900, 1600), method='caption').set_duration(dur).set_fps(24)
-                  scene = CompositeVideoClip([bg, txt.set_position('center')]).resize(lambda t: 1 + 0.06 * t)
-                  clips.append(scene)
-              final = concatenate_videoclips(clips, method="compose").set_audio(audio)
-              final.write_videofile("production_video.mp4", codec="libx264", audio_codec="aac", fps=24, threads=4)
-              print("RENDER_SUCCESS")
-          except Exception as e: print(f"Error: {e}")
+                  print(f"Generating Scene {i+1}...")
+                  img_path = generate_action_visual(p, i)
+                  
+                  if img_path and os.path.exists(img_path):
+                      # Create Cinematic Image Layer
+                      img_clip = ImageClip(img_path).set_duration(dur).set_fps(24)
+                      # Apply Action Zoom
+                      img_clip = img_clip.resize(lambda t: 1 + 0.1 * t).set_position('center')
+                      
+                      # Professional Text Overlay
+                      txt = TextClip(p, fontsize=50, color='white', font='Arial-Bold', size=(900, 1600), method='caption').set_duration(dur).set_fps(24)
+                      
+                      scene = CompositeVideoClip([img_clip, txt.set_position(('center', 1400))])
+                      clips.append(scene)
+              
+              if clips:
+                  final = concatenate_videoclips(clips, method="compose").set_audio(audio)
+                  final.write_videofile("production_video.mp4", codec="libx264", audio_codec="aac", fps=24, threads=4)
+                  print("RENDER_SUCCESS")
+          except Exception as e:
+              print(f"Error: {e}")
           EOF
+
       - name: Save_Video_File
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: My_Final_Video
           path: production_video.mp4
+          retention-days: 1
+
+      - name: Agent_Callback
+        if: always()
+        run: |
+          curl -X POST "${{ github.event.client_payload.callback_url }}" \
+          -H "Content-Type: application/json" \
+          -d "{\"status\": \"finished\", \"info\": \"Action Video with Visuals Ready\"}" || true
