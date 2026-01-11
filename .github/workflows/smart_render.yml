@@ -84,4 +84,4 @@ jobs:
               requests.post(callback, json={"status": "success", "download_url": link}, timeout=20)
 
           except Exception as e:
-              print(f"Production Halted: {str(e)}")
+              print(f"Production Halted: {f"Log: {e}")
