@@ -1,4 +1,4 @@
-name: Viral_Video_Final_v28
+name: Viral_Video_v28_Action
 on:
   repository_dispatch:
     types: [start_smart_render]
@@ -16,59 +16,82 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y ffmpeg imagemagick
           sudo find /etc/ImageMagick* -name "policy.xml" -exec sed -i 's/policy domain="path" rights="none" pattern="@\*"/policy domain="path" rights="read|write" pattern="@\*"/g' {} +
-          pip install "Pillow<10.0.0" moviepy==1.0.3 requests opencv-python-headless
+          # Adding Pillow and opencv for better image handling
+          pip install moviepy==1.0.3 requests Pillow opencv-python-headless
 
-      - name: Video_Rendering
+      - name: Render_Action_v28
         run: |
           python - <<EOF
-          import os, requests, re
-          from moviepy.editor import TextClip, AudioFileClip, ColorClip, concatenate_videoclips, CompositeVideoClip
+          import os, requests, re, urllib.parse
+          from moviepy.editor import TextClip, AudioFileClip, ImageClip, concatenate_videoclips, CompositeVideoClip
 
-          def get_audio(id, dest):
-              url = f"https://docs.google.com/uc?export=download&id={id}"
-              s = requests.Session()
-              r = s.get(url, stream=True)
-              t = next((v for k, v in r.cookies.items() if k.startswith('download_warning')), None)
-              if t: r = s.get(url, params={'id': id, 'confirm': t}, stream=True)
-              with open(dest, "wb") as f:
-                  for c in r.iter_content(32768):
-                      if c: f.write(c)
+          def download_media(url, dest):
+              try:
+                  r = requests.get(url, stream=True, timeout=60)
+                  if r.status_code == 200:
+                      with open(dest, "wb") as f:
+                          for c in r.iter_content(65536): f.write(c)
+                      return True
+              except: pass
+              return False
+
+          def generate_visual(prompt, idx):
+              # Cleaning numbers (1., 2.) from the prompt
+              clean_p = re.sub(r'^\d+[\.\s\-]+', '', prompt.strip())
+              # Injecting your "Generate" logic with high-end cinematic quality
+              refined = "Generate cinematic action visual, 8k, ultra-luxury, " + clean_p
+              encoded = urllib.parse.quote(refined)
+              # Using Pollinations (Flux model) for the image engine
+              url = "https://pollinations.ai/p/" + encoded + "?width=1080&height=1920&seed=" + str(idx+123) + "&model=flux"
+              
+              target = "scene_" + str(idx) + ".jpg"
+              if download_media(url, target):
+                  return target
+              return None
 
           try:
+              # Data from n8n
               raw_prompts = "${{ github.event.client_payload.visual_prompts }}"
               prompts = [p.strip() for p in raw_prompts.split('|') if len(p.strip()) > 5]
               audio_url = "${{ github.event.client_payload.audio_url }}"
               audio_id = re.search(r'id=([a-zA-Z0-9_-]+)', audio_url).group(1)
               
-              get_audio(audio_id, "audio.mp3")
+              # Download Audio (The stable v28 way)
+              print("Downloading Audio...")
+              download_media("https://docs.google.com/uc?export=download&id=" + audio_id, "audio.mp3")
               audio = AudioFileClip("audio.mp3")
               dur = audio.duration / len(prompts)
               
               clips = []
               for i, p in enumerate(prompts):
-                  # Scene Background Setup
-                  bg = ColorClip(size=(1080, 1920), color=(15, 15, 15)).set_duration(dur)
-                  txt = TextClip(p, fontsize=60, color='white', font='Arial-Bold', size=(900, 1600), method='caption').set_duration(dur).set_fps(24)
+                  print("Generating Visual for Scene " + str(i+1))
+                  img_path = generate_visual(p, i)
                   
-                  # Create Composite with Action Zoom
-                  scene = CompositeVideoClip([bg, txt.set_position('center')])
-                  scene = scene.resize(lambda t: 1 + 0.06 * t) 
-                  clips.append(scene)
+                  if img_path:
+                      # v28 Upgrade: Replacing ColorClip with ImageClip
+                      bg = ImageClip(img_path).set_duration(dur).set_fps(24)
+                      # Applying Action Zoom (0.1 growth)
+                      bg = bg.resize(lambda t: 1 + 0.1 * t).set_position('center')
+                      
+                      txt = TextClip(p, fontsize=45, color='white', font='Arial-Bold', size=(900, 1600), method='caption').set_duration(dur)
+                      
+                      scene = CompositeVideoClip([bg, txt.set_position(('center', 1400))])
+                      clips.append(scene)
               
               if clips:
                   final = concatenate_videoclips(clips, method="compose").set_audio(audio)
-                  final.write_videofile("production_video.mp4", codec="libx264", audio_codec="aac", fps=24, threads=4)
+                  # Safe rendering preset
+                  final.write_videofile("production_video.mp4", codec="libx264", audio_codec="aac", fps=24, preset="ultrafast")
                   print("RENDER_SUCCESS")
           except Exception as e:
-              print(f"Error: {e}")
+              print("Log: " + str(e))
+          EOF
 
-      - name: Save_Video_File
-        if: always()
+      - name: Save_Video
         uses: actions/upload-artifact@v4
         with:
-          name: My_Final_Video
+          name: Cinematic_Video_v28
           path: production_video.mp4
-          retention-days: 1
 
       - name: Agent_Callback
         if: always()
