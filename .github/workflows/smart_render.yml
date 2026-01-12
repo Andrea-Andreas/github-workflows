@@ -1,4 +1,4 @@
-name: Viral_Video_Apex_v44
+name: Viral_Video_Final_v28
 on:
   repository_dispatch:
     types: [start_smart_render]
@@ -16,79 +16,51 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y ffmpeg imagemagick
           sudo find /etc/ImageMagick* -name "policy.xml" -exec sed -i 's/policy domain="path" rights="none" pattern="@\*"/policy domain="path" rights="read|write" pattern="@\*"/g' {} +
-          pip install "Pillow<10.0.0" moviepy==1.0.3 requests opencv-python-headless imageio-ffmpeg imageio[pyav]
+          pip install "Pillow<10.0.0" moviepy==1.0.3 requests opencv-python-headless
 
       - name: Video_Rendering
-        env:
-          V_PROMPTS: ${{ github.event.client_payload.visual_prompts }}
-          A_URL: ${{ github.event.client_payload.audio_url }}
         run: |
           python - <<EOF
-          import os, requests, re, urllib.parse, sys
-          from moviepy.editor import TextClip, AudioFileClip, ImageClip, concatenate_videoclips, CompositeVideoClip
+          import os, requests, re
+          from moviepy.editor import TextClip, AudioFileClip, ColorClip, concatenate_videoclips, CompositeVideoClip
 
-          def download_media(url, dest):
-              try:
-                  r = requests.get(url, stream=True, timeout=60)
-                  if r.status_code == 200:
-                      with open(dest, "wb") as f:
-                          for c in r.iter_content(65536): f.write(c)
-                      return True
-              except: pass
-              return False
-
-          def get_visual(prompt, idx):
-              # Cleanup and apply your "Generate Action" command
-              clean_p = re.sub(r'^\d+[\.\s\-]+', '', prompt.strip())
-              clean_p = clean_p.replace('Generate cinematic viral video 6 seconds of', '').strip()
-              
-              # High-end production instructions for Gemini-style visuals
-              refined = "8k, cinematic high-action, ultra-luxurious, " + clean_p
-              encoded = urllib.parse.quote(refined)
-              url = "https://pollinations.ai/p/" + encoded + "?width=1080&height=1920&seed=" + str(idx+55) + "&model=flux"
-              
-              target = "f_" + str(idx) + ".jpg"
-              if download_media(url, target): return target
-              return None
+          def get_audio(id, dest):
+              url = f"https://docs.google.com/uc?export=download&id={id}"
+              s = requests.Session()
+              r = s.get(url, stream=True)
+              t = next((v for k, v in r.cookies.items() if k.startswith('download_warning')), None)
+              if t: r = s.get(url, params={'id': id, 'confirm': t}, stream=True)
+              with open(dest, "wb") as f:
+                  for c in r.iter_content(32768):
+                      if c: f.write(c)
 
           try:
-              raw_data = os.environ.get('V_PROMPTS', '')
-              # Splitting scenes correctly based on your pipe format
-              prompts = [p.strip() for p in raw_data.split('|') if len(p.strip()) > 5]
-              
-              if not prompts:
-                  print("Status: Data missing")
-                  sys.exit(0)
-
-              audio_url = os.environ.get('A_URL', '')
+              raw_prompts = "${{ github.event.client_payload.visual_prompts }}"
+              prompts = [p.strip() for p in raw_prompts.split('|') if len(p.strip()) > 5]
+              audio_url = "${{ github.event.client_payload.audio_url }}"
               audio_id = re.search(r'id=([a-zA-Z0-9_-]+)', audio_url).group(1)
               
-              print("Downloading Production Audio...")
-              download_media("https://docs.google.com/uc?export=download&id=" + audio_id, "audio.mp3")
+              get_audio(audio_id, "audio.mp3")
               audio = AudioFileClip("audio.mp3")
               dur = audio.duration / len(prompts)
               
               clips = []
               for i, p in enumerate(prompts):
-                  print("Generating Cinematic Scene " + str(i+1))
-                  img_path = get_visual(p, i)
+                  # Scene Background Setup
+                  bg = ColorClip(size=(1080, 1920), color=(15, 15, 15)).set_duration(dur)
+                  txt = TextClip(p, fontsize=60, color='white', font='Arial-Bold', size=(900, 1600), method='caption').set_duration(dur).set_fps(24)
                   
-                  if img_path:
-                      img_clip = ImageClip(img_path).set_duration(dur).set_fps(24)
-                      # Implementing your requested action zoom
-                      img_clip = img_clip.resize(lambda t: 1 + 0.1 * t).set_position('center')
-                      
-                      txt = TextClip(p, fontsize=40, color='white', font='Arial-Bold', size=(900, 1600), method='caption').set_duration(dur)
-                      scene = CompositeVideoClip([img_clip, txt.set_position(('center', 1400))])
-                      clips.append(scene)
+                  # Create Composite with Action Zoom
+                  scene = CompositeVideoClip([bg, txt.set_position('center')])
+                  scene = scene.resize(lambda t: 1 + 0.06 * t) 
+                  clips.append(scene)
               
               if clips:
                   final = concatenate_videoclips(clips, method="compose").set_audio(audio)
-                  # Fix for avcodec error using safer codec parameters
-                  final.write_videofile("production_video.mp4", codec="libx264", audio_codec="aac", fps=24, preset="ultrafast", ffmpeg_params=["-pix_fmt", "yuv420p"])
+                  final.write_videofile("production_video.mp4", codec="libx264", audio_codec="aac", fps=24, threads=4)
                   print("RENDER_SUCCESS")
           except Exception as e:
-              print("Process_Status: " + str(e))
+              print(f"Error: {e}")
           EOF
 
       - name: Save_Video_File
@@ -104,4 +76,4 @@ jobs:
         run: |
           curl -X POST "${{ github.event.client_payload.callback_url }}" \
           -H "Content-Type: application/json" \
-          -d "{\"status\": \"finished\", \"info\": \"v44 Victory\"}" || true
+          -d "{\"status\": \"finished\", \"info\": \"Check GitHub Artifacts\"}" || true
