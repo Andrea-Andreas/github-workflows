@@ -16,7 +16,7 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y ffmpeg imagemagick
           sudo find /etc/ImageMagick* -name "policy.xml" -exec sed -i 's/policy domain="path" rights="none" pattern="@\*"/policy domain="path" rights="read|write" pattern="@\*"/g' {} +
-          # Screenshot 003548 fix: Adding imageio[pyav] and imageio-ffmpeg
+          # Fix for Screenshot 003548: Adding the required backend
           pip install "Pillow<10.0.0" moviepy==1.0.3 requests opencv-python-headless "imageio[pyav]" imageio-ffmpeg
 
       - name: Video_Rendering
@@ -38,16 +38,16 @@ jobs:
           def get_image(prompt, idx):
               try:
                   clean_p = re.sub(r'^\d+[\.\s\-]+', '', prompt.strip())
-                  refined = "8k cinematic, luxury style, " + clean_p
-                  url = "https://pollinations.ai/p/" + urllib.parse.quote(refined) + "?width=1080&height=1920&seed=" + str(idx+33) + "&model=flux"
-                  r = requests.get(url, timeout=40)
+                  refined = "8k cinematic luxury action, " + clean_p
+                  url = "https://pollinations.ai/p/" + urllib.parse.quote(refined) + "?width=1080&height=1920&seed=" + str(idx+30) + "&model=flux"
+                  r = requests.get(url, timeout=30)
                   if r.status_code == 200:
                       with open(f"img_{idx}.jpg", "wb") as f: f.write(r.content)
                       return f"img_{idx}.jpg"
-              except: pass
-              return None
+              except: return None
 
           try:
+              # EXACT V28 SKELETON
               raw_prompts = "${{ github.event.client_payload.visual_prompts }}"
               prompts = [p.strip() for p in raw_prompts.split('|') if len(p.strip()) > 5]
               audio_url = "${{ github.event.client_payload.audio_url }}"
@@ -61,8 +61,8 @@ jobs:
               for i, p in enumerate(prompts):
                   img_path = get_image(p, i)
                   
-                  # Fallback logic to avoid avcodec errors
-                  if img_path and os.path.exists(img_path) and os.path.getsize(img_path) > 1000:
+                  # Hybrid Logic: Image if success, else v28 black screen
+                  if img_path and os.path.exists(img_path):
                       bg = ImageClip(img_path).set_duration(dur).set_fps(24)
                   else:
                       bg = ColorClip(size=(1080, 1920), color=(15, 15, 15)).set_duration(dur)
@@ -74,8 +74,7 @@ jobs:
               
               if clips:
                   final = concatenate_videoclips(clips, method="compose").set_audio(audio)
-                  # Screenshot 004313 fix: Adding preset for safer rendering
-                  final.write_videofile("production_video.mp4", codec="libx264", audio_codec="aac", fps=24, threads=4, preset="ultrafast")
+                  final.write_videofile("production_video.mp4", codec="libx264", audio_codec="aac", fps=24, threads=4)
                   print("RENDER_SUCCESS")
           except Exception as e:
               print(f"Error: {e}")
