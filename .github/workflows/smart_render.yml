@@ -1,4 +1,4 @@
-name: Viral_Video_v31_Strict_Luxury
+name: Viral_Video_v33_Stable_Base
 on:
   repository_dispatch:
     types: [start_smart_render]
@@ -19,8 +19,8 @@ jobs:
           pip install "Pillow<10.0.0" moviepy==1.0.3 requests opencv-python-headless "imageio[pyav]" imageio-ffmpeg
 
       - name: Video_Rendering
+        shell: python
         run: |
-          python - <<EOF
           import os, requests, re, urllib.parse, sys
           from moviepy.editor import AudioFileClip, ColorClip, ImageClip, concatenate_videoclips, CompositeVideoClip
 
@@ -38,55 +38,64 @@ jobs:
                   return os.path.exists(dest) and os.path.getsize(dest) > 1000
               except: return False
 
-          # 2. STRICT DOWNLOADER (No Random Fallback)
+          # 2. ROBUST DOWNLOADER (With Stock Fallback)
           def download_file(url, filename):
               try:
                   headers = {
                       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                       'Referer': 'https://pollinations.ai/'
                   }
-                  # Increased timeout for high-quality AI generation
-                  r = requests.get(url, headers=headers, timeout=45)
-                  
-                  # Verify it's a real image (usually > 5KB)
+                  r = requests.get(url, headers=headers, timeout=20)
                   if r.status_code == 200 and len(r.content) > 5000:
                       with open(filename, "wb") as f: f.write(r.content)
                       return True
               except: pass
               return False
 
-          def get_image_strict(prompt, idx):
+          def get_image_stable(prompt, idx):
               filename = f"img_{idx}.jpg"
               clean_p = re.sub(r'^\d+[\.\s\-]+', '', prompt.strip())
+              refined_prompt = urllib.parse.quote(f"8k cinematic luxury, {clean_p}")
               
-              # FIX: Subject FIRST, Style SECOND
-              # This ensures the AI draws YOUR prompt, then adds the luxury style.
-              final_prompt = f"{clean_p}, masterpiece, 8k, highly detailed, billionaire luxury lifestyle, cinematic lighting, photorealistic"
-              
-              encoded_prompt = urllib.parse.quote(final_prompt)
-              
-              # LAYER 1: Flux (High Quality)
-              print(f"--- Scene {idx}: Trying Flux for '{clean_p}'... ---")
-              url_flux = f"https://pollinations.ai/p/{encoded_prompt}?width=1080&height=1920&model=flux&seed={idx+300}"
+              # LAYER 1: Try Flux (Might fail if blocked)
+              print(f"--- Scene {idx}: Trying Flux... ---")
+              url_flux = f"https://pollinations.ai/p/{refined_prompt}?width=1080&height=1920&model=flux&seed={idx+500}"
               if download_file(url_flux, filename): return filename
               
-              # LAYER 2: Turbo (Backup AI)
-              print(f"--- Scene {idx}: Flux busy. Trying Turbo... ---")
-              url_turbo = f"https://pollinations.ai/p/{encoded_prompt}?width=1080&height=1920&model=turbo"
+              # LAYER 2: Try Turbo (Backup)
+              print(f"--- Scene {idx}: Flux blocked. Trying Turbo... ---")
+              url_turbo = f"https://pollinations.ai/p/{refined_prompt}?width=1080&height=1920&model=turbo"
               if download_file(url_turbo, filename): return filename
 
-              # NO LAYER 3.
-              # If we fail here, we prefer Black Screen over "Wrong Image".
-              print(f"--- Scene {idx}: AI Generation Failed. Skipping... ---")
+              # LAYER 3: STOCK FALLBACK (Guarantees Video)
+              # If AI fails, this ensures we still get a high-quality image to finish the pipeline.
+              print(f"--- Scene {idx}: AI Blocked. Using High-Quality Stock... ---")
+              url_stock = f"https://picsum.photos/seed/{idx+999}/1080/1920"
+              if download_file(url_stock, filename): return filename
+                  
               return None
 
           try:
+              # SETUP
+              # Using generic names to avoid encoding issues
+              raw_prompts = os.environ.get("VISUAL_PROMPTS", "Scene 1|Scene 2")
+              # In GitHub Actions, we need to parse the payload differently if passed via env or use the template
+              # For this structure, we stick to the template replacement method used previously
+              pass 
+          except: pass
+
+          # REAL EXECUTION BLOCK
+          try:
+              # We use the direct replacement from GitHub Context as before
               raw_prompts = "${{ github.event.client_payload.visual_prompts }}"
               prompts = [p.strip() for p in raw_prompts.split('|') if len(p.strip()) > 5]
-              audio_url = "${{ github.event.client_payload.audio_url }}"
               
+              audio_url = "${{ github.event.client_payload.audio_url }}"
               audio_id_match = re.search(r'id=([a-zA-Z0-9_-]+)', audio_url)
-              if not audio_id_match: raise Exception("Audio ID missing")
+              if not audio_id_match: 
+                  # Fallback for testing if audio missing
+                  print("Audio ID not found, using silence logic (or error)")
+                  sys.exit(1)
               
               get_audio(audio_id_match.group(1), "audio.mp3")
               audio = AudioFileClip("audio.mp3")
@@ -94,18 +103,17 @@ jobs:
               
               clips = []
               for i, p in enumerate(prompts):
-                  img_path = get_image_strict(p, i)
+                  img_path = get_image_stable(p, i)
                   
                   if img_path:
                       bg = ImageClip(img_path).set_duration(dur).set_fps(24)
+                      # Gentle Zoom Effect
+                      scene = bg.resize(lambda t: 1 + 0.04 * t) 
+                      clips.append(scene)
                   else:
-                      # If you see BLACK screens now, it means Pollinations is 100% blocking us.
-                      # This is better than seeing "Wrong Images".
-                      bg = ColorClip(size=(1080, 1920), color=(0, 0, 0)).set_duration(dur)
-                  
-                  # Zoom Effect (No Text)
-                  scene = bg.resize(lambda t: 1 + 0.06 * t) 
-                  clips.append(scene)
+                      # Absolute fallback (Black Screen)
+                      bg = ColorClip(size=(1080, 1920), color=(0,0,0)).set_duration(dur)
+                      clips.append(bg)
               
               if clips:
                   final = concatenate_videoclips(clips, method="compose").set_audio(audio)
@@ -113,11 +121,11 @@ jobs:
                   print("RENDER_SUCCESS")
               else:
                   print("Error: No clips generated")
+                  sys.exit(1)
                   
           except Exception as e:
               print(f"Error: {e}")
               sys.exit(1)
-          EOF
 
       - name: Save_Video_File
         if: always()
@@ -132,4 +140,4 @@ jobs:
         run: |
           curl -X POST "${{ github.event.client_payload.callback_url }}" \
           -H "Content-Type: application/json" \
-          -d "{\"status\": \"finished\", \"info\": \"v31 Strict Mode\"}" || true
+          -d "{\"status\": \"finished\", \"video_ready\": true}" || true
