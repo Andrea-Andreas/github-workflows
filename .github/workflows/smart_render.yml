@@ -12,61 +12,50 @@ jobs:
         with:
           python-version: '3.9'
 
-      - name: Install_Minimal_Tools
-        run: |
-          pip install requests
+      - name: Install_Tools
+        run: pip install requests
 
-      - name: Run_Diagnostic_Probe
+      - name: Run_Diagnostic
         run: |
           python - <<EOF
-          import requests, os, time
+          import requests, time
 
-          def test_download(description, url_suffix):
-              print(f"\n--- TESTING: {description} ---")
-              # Using a very simple, direct URL structure
-              base_url = "https://pollinations.ai/p/"
-              final_url = base_url + url_suffix
-              print(f"Target URL: {final_url}")
-
-              # Stronger Browser Headers
+          def test_url(desc, url):
+              print(f"\n--- TESTING: {desc} ---")
+              print(f"URL: {url}")
+              
+              # Hiding as a real Chrome browser (Updated Headers)
               headers = {
-                  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                  'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                   'Referer': 'https://pollinations.ai/'
               }
 
               try:
-                  response = requests.get(final_url, headers=headers, timeout=30, allow_redirects=True)
-                  print(f"Status Code: {response.status_code}")
-                  
-                  # Inspect the content
-                  content_size = len(response.content)
-                  print(f"Downloaded Size: {content_size} bytes")
+                  r = requests.get(url, headers=headers, timeout=30)
+                  print(f"Status Code: {r.status_code}")
+                  print(f"Content Type: {r.headers.get('Content-Type')}")
+                  print(f"File Size: {len(r.content)} bytes")
 
-                  filename = f"debug_{int(time.time())}.jpg"
-                  
-                  if response.status_code == 200 and content_size > 5000:
-                      print("✅ SUCCESS: Looks like a valid image.")
-                      with open(filename, "wb") as f: f.write(response.content)
-                  else:
-                      print("❌ FAILURE: File is too small or error occurred.")
-                      # CRITICAL: Print the content to see the error message
-                      print("--- SERVER RESPONSE CONTENT ---")
+                  # THE TRUTH REVEALED:
+                  # If file is small (< 5KB), it's an error message, not an image.
+                  if len(r.content) < 5000:
+                      print("❌ FAILED. SERVER RESPONSE TEXT (READ THIS):")
+                      print("-" * 30)
                       try:
-                          print(response.content.decode('utf-8')[:500])
+                          # Print the error message sent by server
+                          print(r.content.decode('utf-8')) 
                       except:
-                          print("Cannot decode content (binary data).")
-                      print("-------------------------------")
-                      
+                          print("Binary content (cannot display)")
+                      print("-" * 30)
+                  else:
+                      print("✅ SUCCESS: Valid Image detected!")
+
               except Exception as e:
                   print(f"CRITICAL ERROR: {e}")
 
-          # TEST 1: Simple Prompt, No Parameters (Default Model)
-          test_download("Simple Prompt", "cat")
+          # TEST 1: Simple Flux (No Prompt)
+          test_url("Test 1: Basic Flux", "https://pollinations.ai/p/test_image?width=1080&height=1920&model=flux")
 
-          # TEST 2: Flux Model Explicit
-          test_download("Flux Model", "luxury_car?model=flux&width=1080&height=1920")
-
-          # TEST 3: Seeded Flux (What we use in v28)
-          test_download("Seeded Flux", "cyberpunk_city?model=flux&width=1080&height=1920&seed=42")
+          # TEST 2: Complex Prompt (Like our project)
+          test_url("Test 2: Luxury Car", "https://pollinations.ai/p/luxury%20ferrari%20cinematic?width=1080&height=1920&model=flux&seed=42")
           EOF
