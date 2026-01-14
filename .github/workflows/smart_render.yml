@@ -15,16 +15,16 @@ jobs:
       - name: Install_Tools
         run: pip install requests
 
-      - name: Run_Diagnostic
+      - name: Run_Diagnostic_Probe
         run: |
           python - <<EOF
-          import requests, time
+          import requests
 
           def test_url(desc, url):
               print(f"\n--- TESTING: {desc} ---")
               print(f"URL: {url}")
               
-              # Hiding as a real Chrome browser (Updated Headers)
+              # Mimic a real Chrome browser to bypass simple bot filters
               headers = {
                   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                   'Referer': 'https://pollinations.ai/'
@@ -33,29 +33,9 @@ jobs:
               try:
                   r = requests.get(url, headers=headers, timeout=30)
                   print(f"Status Code: {r.status_code}")
-                  print(f"Content Type: {r.headers.get('Content-Type')}")
                   print(f"File Size: {len(r.content)} bytes")
 
-                  # THE TRUTH REVEALED:
-                  # If file is small (< 5KB), it's an error message, not an image.
+                  # Logic: If file is small (< 5KB), it is likely an error text, not an image.
                   if len(r.content) < 5000:
-                      print("❌ FAILED. SERVER RESPONSE TEXT (READ THIS):")
-                      print("-" * 30)
-                      try:
-                          # Print the error message sent by server
-                          print(r.content.decode('utf-8')) 
-                      except:
-                          print("Binary content (cannot display)")
-                      print("-" * 30)
-                  else:
-                      print("✅ SUCCESS: Valid Image detected!")
-
-              except Exception as e:
-                  print(f"CRITICAL ERROR: {e}")
-
-          # TEST 1: Simple Flux (No Prompt)
-          test_url("Test 1: Basic Flux", "https://pollinations.ai/p/test_image?width=1080&height=1920&model=flux")
-
-          # TEST 2: Complex Prompt (Like our project)
-          test_url("Test 2: Luxury Car", "https://pollinations.ai/p/luxury%20ferrari%20cinematic?width=1080&height=1920&model=flux&seed=42")
-          EOF
+                      print("❌ FAILED. SERVER MESSAGE (READ THIS):")
+                      print("vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
