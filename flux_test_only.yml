@@ -1,0 +1,75 @@
+name: Flux_Only_Test_Probe
+on:
+  repository_dispatch:
+    types: [start_smart_render]
+
+jobs:
+  test_images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install_Minimal_Tools
+        run: |
+          pip install requests Pillow
+
+      - name: Run_Image_Probe
+        run: |
+          python - <<EOF
+          import requests, os, urllib.parse
+
+          def download_test_image(prompt, filename):
+              try:
+                  print(f"--- Attempting to download: {filename} ---")
+                  
+                  # 1. Clean Prompt
+                  refined = "8k cinematic luxury action, " + prompt
+                  encoded = urllib.parse.quote(refined)
+                  
+                  # 2. Construct URL (Exact Flux Model)
+                  url = f"https://pollinations.ai/p/{encoded}?width=1080&height=1920&seed=42&model=flux"
+                  print(f"URL: {url}")
+                  
+                  # 3. Simulate Browser (Crucial for bypassing blocks)
+                  headers = {
+                      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                      'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
+                  }
+                  
+                  # 4. Request
+                  response = requests.get(url, headers=headers, timeout=30)
+                  
+                  if response.status_code == 200:
+                      # 5. Save Raw Data
+                      with open(filename, "wb") as f:
+                          f.write(response.content)
+                      
+                      size = os.path.getsize(filename)
+                      print(f"SUCCESS: {filename} saved. Size: {size} bytes")
+                      
+                      # 6. Verify it's not a text/html error page
+                      if size < 1000:
+                          print("WARNING: File is too small. Likely an error text.")
+                  else:
+                      print(f"FAILED: Status Code {response.status_code}")
+                      print(f"Response: {response.text[:200]}") # Print first 200 chars of error
+                      
+              except Exception as e:
+                  print(f"CRITICAL ERROR: {e}")
+
+          # TEST CASES
+          download_test_image("Red Ferrari drifting in rain", "test_img_1.jpg")
+          download_test_image("Cyberpunk city with neon lights", "test_img_2.jpg")
+          download_test_image("Lion roaring in jungle", "test_img_3.jpg")
+          EOF
+
+      - name: Upload_Evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Flux_Evidence_Images
+          path: "*.jpg"
+          retention-days: 1
