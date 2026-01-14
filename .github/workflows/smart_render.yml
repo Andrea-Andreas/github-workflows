@@ -1,10 +1,10 @@
-name: Flux_Only_Test_Probe
+name: Flux_Probe_DeepScan
 on:
   repository_dispatch:
     types: [start_smart_render]
 
 jobs:
-  test_images:
+  deep_scan:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -14,62 +14,59 @@ jobs:
 
       - name: Install_Minimal_Tools
         run: |
-          pip install requests Pillow
+          pip install requests
 
-      - name: Run_Image_Probe
+      - name: Run_Diagnostic_Probe
         run: |
           python - <<EOF
-          import requests, os, urllib.parse
+          import requests, os, time
 
-          def download_test_image(prompt, filename):
+          def test_download(description, url_suffix):
+              print(f"\n--- TESTING: {description} ---")
+              # Using a very simple, direct URL structure
+              base_url = "https://pollinations.ai/p/"
+              final_url = base_url + url_suffix
+              print(f"Target URL: {final_url}")
+
+              # Stronger Browser Headers
+              headers = {
+                  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                  'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+                  'Referer': 'https://pollinations.ai/'
+              }
+
               try:
-                  print(f"--- Attempting to download: {filename} ---")
+                  response = requests.get(final_url, headers=headers, timeout=30, allow_redirects=True)
+                  print(f"Status Code: {response.status_code}")
                   
-                  # 1. Clean Prompt
-                  refined = "8k cinematic luxury action, " + prompt
-                  encoded = urllib.parse.quote(refined)
+                  # Inspect the content
+                  content_size = len(response.content)
+                  print(f"Downloaded Size: {content_size} bytes")
+
+                  filename = f"debug_{int(time.time())}.jpg"
                   
-                  # 2. Construct URL (Exact Flux Model)
-                  url = f"https://pollinations.ai/p/{encoded}?width=1080&height=1920&seed=42&model=flux"
-                  print(f"URL: {url}")
-                  
-                  # 3. Simulate Browser (Crucial for bypassing blocks)
-                  headers = {
-                      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                      'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
-                  }
-                  
-                  # 4. Request
-                  response = requests.get(url, headers=headers, timeout=30)
-                  
-                  if response.status_code == 200:
-                      # 5. Save Raw Data
-                      with open(filename, "wb") as f:
-                          f.write(response.content)
-                      
-                      size = os.path.getsize(filename)
-                      print(f"SUCCESS: {filename} saved. Size: {size} bytes")
-                      
-                      # 6. Verify it's not a text/html error page
-                      if size < 1000:
-                          print("WARNING: File is too small. Likely an error text.")
+                  if response.status_code == 200 and content_size > 5000:
+                      print("✅ SUCCESS: Looks like a valid image.")
+                      with open(filename, "wb") as f: f.write(response.content)
                   else:
-                      print(f"FAILED: Status Code {response.status_code}")
-                      print(f"Response: {response.text[:200]}") # Print first 200 chars of error
+                      print("❌ FAILURE: File is too small or error occurred.")
+                      # CRITICAL: Print the content to see the error message
+                      print("--- SERVER RESPONSE CONTENT ---")
+                      try:
+                          print(response.content.decode('utf-8')[:500])
+                      except:
+                          print("Cannot decode content (binary data).")
+                      print("-------------------------------")
                       
               except Exception as e:
                   print(f"CRITICAL ERROR: {e}")
 
-          # TEST CASES
-          download_test_image("Red Ferrari drifting in rain", "test_img_1.jpg")
-          download_test_image("Cyberpunk city with neon lights", "test_img_2.jpg")
-          download_test_image("Lion roaring in jungle", "test_img_3.jpg")
-          EOF
+          # TEST 1: Simple Prompt, No Parameters (Default Model)
+          test_download("Simple Prompt", "cat")
 
-      - name: Upload_Evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Flux_Evidence_Images
-          path: "*.jpg"
-          retention-days: 1
+          # TEST 2: Flux Model Explicit
+          test_download("Flux Model", "luxury_car?model=flux&width=1080&height=1920")
+
+          # TEST 3: Seeded Flux (What we use in v28)
+          test_download("Seeded Flux", "cyberpunk_city?model=flux&width=1080&height=1920&seed=42")
+          EOF
