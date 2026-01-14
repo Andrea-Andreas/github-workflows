@@ -1,4 +1,4 @@
-name: Viral_Video_Golden_Base
+name: Viral_Video_v30_NoText_Luxury
 on:
   repository_dispatch:
     types: [start_smart_render]
@@ -22,7 +22,7 @@ jobs:
         run: |
           python - <<EOF
           import os, requests, re, urllib.parse, sys
-          from moviepy.editor import TextClip, AudioFileClip, ColorClip, ImageClip, concatenate_videoclips, CompositeVideoClip
+          from moviepy.editor import AudioFileClip, ColorClip, ImageClip, concatenate_videoclips, CompositeVideoClip
 
           # 1. AUDIO DOWNLOADER
           def get_audio(id, dest):
@@ -38,46 +38,58 @@ jobs:
                   return os.path.exists(dest) and os.path.getsize(dest) > 1000
               except: return False
 
-          # 2. ROBUST IMAGE DOWNLOADER (3-Layer Logic)
+          # 2. ENHANCED IMAGE DOWNLOADER
           def download_file(url, filename):
               try:
-                  headers = {'User-Agent': 'Mozilla/5.0'}
-                  r = requests.get(url, headers=headers, timeout=20)
+                  # Full Browser Simulation Headers
+                  headers = {
+                      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                      'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+                      'Referer': 'https://pollinations.ai/',
+                      'Accept-Language': 'en-US,en;q=0.9'
+                  }
+                  r = requests.get(url, headers=headers, timeout=25)
                   if r.status_code == 200 and len(r.content) > 5000:
                       with open(filename, "wb") as f: f.write(r.content)
                       return True
               except: pass
               return False
 
-          def get_image_unstoppable(prompt, idx):
+          def get_image_luxury(prompt, idx):
               filename = f"img_{idx}.jpg"
               clean_p = re.sub(r'^\d+[\.\s\-]+', '', prompt.strip())
               
-              # LAYER 1: Flux Model
-              print(f"--- Scene {idx}: Trying Flux... ---")
-              url_flux = "https://pollinations.ai/p/" + urllib.parse.quote("8k cinematic " + clean_p) + "?width=1080&height=1920&model=flux&seed=" + str(idx+100)
+              # FORCE LUXURY STYLE
+              # This ensures every image has the "Billionaire" look
+              final_prompt = "8k realistic billionaire luxury lifestyle, " + clean_p
+              encoded_prompt = urllib.parse.quote(final_prompt)
+              
+              # LAYER 1: Flux Model (The Goal)
+              print(f"--- Scene {idx}: Requesting Luxury Flux... ---")
+              url_flux = f"https://pollinations.ai/p/{encoded_prompt}?width=1080&height=1920&model=flux&seed={idx+2024}"
               if download_file(url_flux, filename): return filename
               
               # LAYER 2: Turbo Model (Backup)
               print(f"--- Scene {idx}: Flux blocked. Trying Turbo... ---")
-              url_turbo = "https://pollinations.ai/p/" + urllib.parse.quote("cinematic " + clean_p) + "?width=1080&height=1920&model=turbo"
+              url_turbo = f"https://pollinations.ai/p/{encoded_prompt}?width=1080&height=1920&model=turbo"
               if download_file(url_turbo, filename): return filename
 
-              # LAYER 3: Stock Photo (Fail-Safe)
-              print(f"--- Scene {idx}: Using Stock Fallback... ---")
-              url_stock = f"https://picsum.photos/seed/{idx+555}/1080/1920"
+              # LAYER 3: Stock (Last Resort - Random)
+              # If we reach here, it means we are blocked.
+              print(f"--- Scene {idx}: AI Blocked. Using Stock... ---")
+              url_stock = f"https://picsum.photos/seed/{idx+999}/1080/1920"
               if download_file(url_stock, filename): return filename
                   
               return None
 
           try:
-              # SETUP & PARSING
+              # SETUP
               raw_prompts = "${{ github.event.client_payload.visual_prompts }}"
               prompts = [p.strip() for p in raw_prompts.split('|') if len(p.strip()) > 5]
               audio_url = "${{ github.event.client_payload.audio_url }}"
               
               audio_id_match = re.search(r'id=([a-zA-Z0-9_-]+)', audio_url)
-              if not audio_id_match: raise Exception("Audio ID not found")
+              if not audio_id_match: raise Exception("Audio ID missing")
               
               get_audio(audio_id_match.group(1), "audio.mp3")
               audio = AudioFileClip("audio.mp3")
@@ -85,16 +97,15 @@ jobs:
               
               clips = []
               for i, p in enumerate(prompts):
-                  img_path = get_image_unstoppable(p, i)
+                  img_path = get_image_luxury(p, i)
                   
                   if img_path:
                       bg = ImageClip(img_path).set_duration(dur).set_fps(24)
                   else:
                       bg = ColorClip(size=(1080, 1920), color=(0, 0, 0)).set_duration(dur)
                   
-                  # Text & Composition
-                  txt = TextClip(p, fontsize=60, color='white', font='Arial-Bold', size=(900, 1600), method='caption').set_duration(dur).set_fps(24)
-                  scene = CompositeVideoClip([bg, txt.set_position('center')]).resize(lambda t: 1 + 0.06 * t) 
+                  # ONLY IMAGE + ZOOM (No Text)
+                  scene = bg.resize(lambda t: 1 + 0.06 * t) 
                   clips.append(scene)
               
               if clips:
@@ -122,4 +133,4 @@ jobs:
         run: |
           curl -X POST "${{ github.event.client_payload.callback_url }}" \
           -H "Content-Type: application/json" \
-          -d "{\"status\": \"finished\", \"info\": \"Golden Base Success\"}" || true
+          -d "{\"status\": \"finished\", \"info\": \"v30 NoText Luxury\"}" || true
