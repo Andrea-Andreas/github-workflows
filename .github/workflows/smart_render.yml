@@ -1,4 +1,4 @@
-name: Flux_Probe_DeepScan
+name: Flux_Probe_DeepScan_Fix
 on:
   repository_dispatch:
     types: [start_smart_render]
@@ -16,15 +16,15 @@ jobs:
         run: pip install requests
 
       - name: Run_Diagnostic_Probe
+        shell: python
         run: |
-          python - <<EOF
           import requests
 
           def test_url(desc, url):
               print(f"\n--- TESTING: {desc} ---")
               print(f"URL: {url}")
               
-              # Mimic a real Chrome browser to bypass simple bot filters
+              # Mimic a real Chrome browser
               headers = {
                   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                   'Referer': 'https://pollinations.ai/'
@@ -35,7 +35,21 @@ jobs:
                   print(f"Status Code: {r.status_code}")
                   print(f"File Size: {len(r.content)} bytes")
 
-                  # Logic: If file is small (< 5KB), it is likely an error text, not an image.
+                  # Logic: If file is small (< 5KB), it is likely an error text
                   if len(r.content) < 5000:
                       print("❌ FAILED. SERVER MESSAGE (READ THIS):")
-                      print("vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+                      print("vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv")
+                      try:
+                          # Decode and print the server error message
+                          print(r.content.decode('utf-8')) 
+                      except:
+                          print("Binary content (cannot decode)")
+                      print("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
+                  else:
+                      print("✅ SUCCESS: Valid Image detected!")
+
+              except Exception as e:
+                  print(f"CRITICAL ERROR: {e}")
+
+          # Execute Test
+          test_url("Attempt 1", "https://pollinations.ai/p/luxury%20ferrari?width=1080&height=1920&model=flux")
