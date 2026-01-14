@@ -1,4 +1,4 @@
-name: Flux_Probe_DeepScan_Fix
+name: Flux_Probe_DeepScan_Clean
 on:
   repository_dispatch:
     types: [start_smart_render]
@@ -35,18 +35,17 @@ jobs:
                   print(f"Status Code: {r.status_code}")
                   print(f"File Size: {len(r.content)} bytes")
 
-                  # Logic: If file is small (< 5KB), it is likely an error text
+                  # Logic: If file is small (< 5KB), it is likely an error message.
                   if len(r.content) < 5000:
-                      print("❌ FAILED. SERVER MESSAGE (READ THIS):")
-                      print("vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv")
+                      print("SERVER MESSAGE BELOW:")
+                      print("-" * 20)
                       try:
-                          # Decode and print the server error message
                           print(r.content.decode('utf-8')) 
                       except:
                           print("Binary content (cannot decode)")
-                      print("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
+                      print("-" * 20)
                   else:
-                      print("✅ SUCCESS: Valid Image detected!")
+                      print("SUCCESS: Valid Image detected!")
 
               except Exception as e:
                   print(f"CRITICAL ERROR: {e}")
