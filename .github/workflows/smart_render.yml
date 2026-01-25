@@ -51,25 +51,28 @@ jobs:
 
           def get_image_stable(prompt, idx):
               filename = f"img_{idx}.jpg"
-              # List of image IDs from your Motivation_Assets folder
-              # You can add as many IDs as you want here
-              image_ids = [
-                  "1LjxOfw4ltZypgKynhlp5pPkN-PVKQcnn" 
-              ]
+              # Your Folder ID: 1LjxOfw4ltZypgKynhlp5pPkN-PVKQcnn
+              # We will try to download the file directly to see if it works
               
-              # Using the existing get_audio function logic to download images
               try:
-                  # Pick ID based on current scene index
-                  current_id = image_ids[idx % len(image_ids)]
-                  if get_audio(current_id, filename):
-                      return filename
-              except:
-                  pass
-              
-              # Final Fallback to stock if drive fails
-              url_stock = f"https://picsum.photos/seed/{idx+999}/1080/1920"
-              if download_file(url_stock, filename): return filename
-              return None
+                  # This is a test URL structure for direct download
+                  # In a real scenario, you need the FILE_ID, not FOLDER_ID
+                  # For testing, let's see if the script can reach the folder
+                  folder_url = f"https://docs.google.com/uc?export=download&id=1LjxOfw4ltZypgKynhlp5pPkN-PVKQcnn"
+                  
+                  s = requests.Session()
+                  r = s.get(folder_url, stream=True)
+                  
+                  with open(filename, "wb") as f:
+                      for c in r.iter_content(32768):
+                          if c: f.write(c)
+                  
+                  print(f"Attempting to download from Drive. File size: {os.path.getsize(filename)}")
+                  return filename
+              except Exception as e:
+                  print(f"DRIVE_ERROR: {e}")
+                  # NO FALLBACK HERE - If it fails, the script will stop
+                  raise e
 
           # EXECUTION
           try:
