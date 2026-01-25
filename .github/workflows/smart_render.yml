@@ -51,25 +51,22 @@ jobs:
 
           def get_image_stable(prompt, idx):
               filename = f"img_{idx}.jpg"
-              # Using your Drive Folder ID and Scene naming pattern
-              # Pattern: Scene_0108_0313_N.png
-              folder_id = "1LjxOfw4ltZypgKynhlp5pPkN-PVKQcnn"
+              # List of image IDs from your Motivation_Assets folder
+              # You can add as many IDs as you want here
+              image_ids = [
+                  "1LjxOfw4ltZypgKynhlp5pPkN-PVKQcnn" 
+              ]
               
-              # This logic picks images sequentially based on the scene index
-              image_id_url = f"https://docs.google.com/uc?export=download&id={folder_id}"
-              
-              # Fallback to stock if drive call fails
+              # Using the existing get_audio function logic to download images
               try:
-                  # Note: Direct drive file access usually requires specific file IDs.
-                  # For now, we use a stable stock source to ensure the render never fails
-                  # while you are testing the drive connection.
-                  url_stock = f"https://picsum.photos/seed/{idx+999}/1080/1920"
-                  if download_file(url_stock, filename):
+                  # Pick ID based on current scene index
+                  current_id = image_ids[idx % len(image_ids)]
+                  if get_audio(current_id, filename):
                       return filename
               except:
                   pass
-              return None
               
+              # Final Fallback to stock if drive fails
               url_stock = f"https://picsum.photos/seed/{idx+999}/1080/1920"
               if download_file(url_stock, filename): return filename
               return None
