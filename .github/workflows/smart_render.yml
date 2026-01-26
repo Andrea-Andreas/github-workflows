@@ -7,89 +7,176 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write # Needed to create release artifacts
+      # id-token: write # Not strictly needed if using Service Account JSON directly
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
-      - name: Install_Tools
+      - name: Install_Tools_and_Python_Libs
         run: |
           sudo apt-get update && sudo apt-get install -y ffmpeg imagemagick
           sudo find /etc/ImageMagick* -name "policy.xml" -exec sed -i 's/policy domain="path" rights="none" pattern="@\*"/policy domain="path" rights="read|write" pattern="@\*"/g' {} +
-          pip install "Pillow<10.0.0" moviepy==1.0.3 requests opencv-python-headless "imageio[pyav]" imageio-ffmpeg
+          pip install "Pillow<10.0.0" moviepy==1.0.3 requests opencv-python-headless "imageio[pyav]" imageio-ffmpeg google-api-python-client google-auth-httplib2 google-auth-oauthlib
 
       - name: Video_Rendering
         shell: python
+        env:
+          GOOGLE_SERVICE_ACCOUNT_CREDENTIALS: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_CREDENTIALS }} # GitHub Secret value
+          GOOGLE_DRIVE_FOLDER_ID: ${{ github.event.client_payload.google_drive_folder_id }} # From n8n payload
         run: |
-          import os, requests, re, urllib.parse, sys
+          import os, requests, re, urllib.parse, sys, json, random
           from moviepy.editor import AudioFileClip, ColorClip, ImageClip, concatenate_videoclips, CompositeVideoClip
+          from google.oauth2 import service_account
+          from googleapiclient.discovery import build
+          from googleapiclient.http import MediaIoBaseDownload
+          import io
 
-          def get_audio(id, dest):
+          # --- Google Drive API Setup ---
+          def authenticate_google_drive():
               try:
-                  url = f"https://docs.google.com/uc?export=download&id={id}"
-                  s = requests.Session()
-                  r = s.get(url, stream=True)
-                  t = next((v for k, v in r.cookies.items() if k.startswith('download_warning')), None)
-                  if t: r = s.get(url, params={'id': id, 'confirm': t}, stream=True)
-                  with open(dest, "wb") as f:
-                      for c in r.iter_content(32768):
-                          if c: f.write(c)
-                  return os.path.exists(dest) and os.path.getsize(dest) > 1000
-              except: return False
+                  credentials_json_str = os.environ.get('GOOGLE_SERVICE_ACCOUNT_CREDENTIALS')
+                  if not credentials_json_str:
+                      raise ValueError("GOOGLE_SERVICE_ACCOUNT_CREDENTIALS environment variable not set.")
+                  
+                  credentials_info = json.loads(credentials_json_str)
+                  credentials = service_account.Credentials.from_service_account_info(
+                      credentials_info,
+                      scopes=['https://www.googleapis.com/auth/drive.readonly'] # Read-only access for files
+                  )
+                  return build('drive', 'v3', credentials=credentials)
+              except Exception as e:
+                  print(f"Error authenticating Google Drive: {e}", file=sys.stderr)
+                  sys.exit(1)
 
-          def download_file(url, filename):
+          def download_google_drive_file(drive_service, file_id, dest_filename):
               try:
-                  headers = {'User-Agent': 'Mozilla/5.0', 'Referer': 'https://pollinations.ai/'}
-                  r = requests.get(url, headers=headers, timeout=20)
-                  if r.status_code == 200 and len(r.content) > 5000:
-                      with open(filename, "wb") as f: f.write(r.content)
-                      return True
-              except: pass
-              return False
+                  request = drive_service.files().get_media(fileId=file_id)
+                  fh = io.BytesIO()
+                  downloader = MediaIoBaseDownload(fh, request)
+                  done = False
+                  while not done:
+                      status, done = downloader.next_chunk()
+                  
+                  with open(dest_filename, 'wb') as f:
+                      f.write(fh.getvalue())
+                  print(f"Downloaded {dest_filename} (ID: {file_id})")
+                  return True
+              except Exception as e:
+                  print(f"Error downloading Google Drive file {file_id}: {e}", file=sys.stderr)
+                  return False
 
-          def get_image_stable(prompt, idx):
-              filename = f"img_{idx}.jpg"
-              clean_p = re.sub(r'^\d+[\.\s\-]+', '', prompt.strip())
-              refined_prompt = urllib.parse.quote(f"8k cinematic luxury, {clean_p}")
-              
-              # Try AI (Flux -> Turbo) -> Stock
-              for model in ["flux", "turbo"]:
-                  url = f"https://pollinations.ai/p/{refined_prompt}?width=1080&height=1920&model={model}&seed={idx+500}"
-                  if download_file(url, filename): return filename
-              
-              url_stock = f"https://picsum.photos/seed/{idx+999}/1080/1920"
-              if download_file(url_stock, filename): return filename
-              return None
+          def get_audio_file(drive_service, audio_url, dest_filename="audio.mp3"):
+              audio_file_id = None
+              audio_id_match = re.search(r'id=([a-zA-Z0-9_-]+)', audio_url)
+              if audio_id_match:
+                  audio_file_id = audio_id_match.group(1)
 
-          # EXECUTION
+              if audio_file_id:
+                  print(f"Attempting to download audio from Google Drive with ID: {audio_file_id}")
+                  if download_google_drive_file(drive_service, audio_file_id, dest_filename):
+                      return os.path.exists(dest_filename) and os.path.getsize(dest_filename) > 1000
+                  else:
+                      print("Failed to download audio from Google Drive via API.")
+                      return False
+              else:
+                  print(f"Audio URL '{audio_url}' does not appear to be a Google Drive link. Attempting direct download.")
+                  try:
+                      r = requests.get(audio_url, stream=True)
+                      r.raise_for_status() # Raise an HTTPError for bad responses (4xx or 5xx)
+                      with open(dest_filename, "wb") as f:
+                          for c in r.iter_content(32768):
+                              if c: f.write(c)
+                      print("Audio downloaded via direct URL.")
+                      return os.path.exists(dest_filename) and os.path.getsize(dest_filename) > 1000
+                  except Exception as e:
+                      print(f"Failed to download audio directly from URL: {e}", file=sys.stderr)
+                      return False
+
+          def get_random_google_drive_images(drive_service, folder_id, num_images_to_select):
+              try:
+                  query = f"'{folder_id}' in parents and mimeType contains 'image/' and trashed = false"
+                  results = drive_service.files().list(
+                      q=query,
+                      fields="files(id, name)",
+                      pageSize=1000 # Max page size for listing files
+                  ).execute()
+                  items = results.get('files', [])
+                  
+                  if not items:
+                      print(f"No images found in Google Drive folder: {folder_id}", file=sys.stderr)
+                      return []
+
+                  # Randomly select num_images_to_select file IDs
+                  # Ensure we don't try to sample more than available items
+                  selected_image_infos = random.sample(items, min(num_images_to_select, len(items)))
+
+                  downloaded_paths = []
+                  for idx, img_info in enumerate(selected_image_infos):
+                      file_id = img_info['id']
+                      # Use a standardized local filename for processing
+                      local_filename = f"gd_img_{idx:02d}.jpg" # Pad with zero for sorting if needed
+                      if download_google_drive_file(drive_service, file_id, local_filename):
+                          downloaded_paths.append(local_filename)
+                  return downloaded_paths
+              except Exception as e:
+                  print(f"Error listing/downloading images from Google Drive folder {folder_id}: {e}", file=sys.stderr)
+                  return []
+
+          # --- Main Execution ---
           try:
+              # Authenticate Google Drive
+              drive_service = authenticate_google_drive()
+
+              # Get inputs from n8n client_payload
               raw_prompts = "${{ github.event.client_payload.visual_prompts }}"
               prompts = [p.strip() for p in raw_prompts.split('|') if len(p.strip()) > 5]
               audio_url = "${{ github.event.client_payload.audio_url }}"
-              audio_id_match = re.search(r'id=([a-zA-Z0-9_-]+)', audio_url)
+              google_drive_folder_id = os.environ.get('GOOGLE_DRIVE_FOLDER_ID')
+
+              if not google_drive_folder_id:
+                  print("Error: GOOGLE_DRIVE_FOLDER_ID environment variable not set in workflow. Cannot download images.", file=sys.stderr)
+                  sys.exit(1)
+
+              # Download Audio File
+              if not get_audio_file(drive_service, audio_url, "audio.mp3"):
+                   print("Failed to download any audio file.", file=sys.stderr)
+                   sys.exit(1)
               
-              if not audio_id_match: sys.exit(1)
-              get_audio(audio_id_match.group(1), "audio.mp3")
               audio = AudioFileClip("audio.mp3")
-              dur = audio.duration / len(prompts)
               
+              # Download Random Images
+              num_images_needed = len(prompts) if prompts else 10 # If no prompts, default to 10 images
+              print(f"Attempting to download {num_images_needed} random images from Google Drive folder: {google_drive_folder_id}")
+              image_paths = get_random_google_drive_images(drive_service, google_drive_folder_id, num_images_needed)
+
+              if not image_paths:
+                  print("No images downloaded for rendering.", file=sys.stderr)
+                  sys.exit(1)
+              
+              # Adjust duration per clip based on actual number of images downloaded
+              dur = audio.duration / len(image_paths) 
+              print(f"Audio duration: {audio.duration}s. Number of images: {len(image_paths)}. Duration per image: {dur}s.")
+
               clips = []
-              for i, p in enumerate(prompts):
-                  img_path = get_image_stable(p, i)
-                  if img_path:
-                      bg = ImageClip(img_path).set_duration(dur).set_fps(24)
-                      scene = bg.resize(lambda t: 1 + 0.04 * t) 
-                      clips.append(scene)
+              for img_path in image_paths: 
+                  # print(f"Processing image: {img_path}")
+                  bg = ImageClip(img_path).set_duration(dur).set_fps(24)
+                  scene = bg.resize(lambda t: 1 + 0.04 * t) # Basic zoom effect
+                  clips.append(scene)
               
               if clips:
                   final = concatenate_videoclips(clips, method="compose").set_audio(audio)
                   final.write_videofile("final_video.mp4", codec="libx264", audio_codec="aac", fps=24, threads=4, preset='ultrafast')
                   print("RENDER_SUCCESS")
-              else: sys.exit(1)
+              else: 
+                  print("No video clips created.", file=sys.stderr)
+                  sys.exit(1)
+
           except Exception as e:
-              print(f"Error: {e}")
+              print(f"Fatal Error during video rendering: {e}", file=sys.stderr) 
               sys.exit(1)
 
       - name: Create Release
