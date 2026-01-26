@@ -50,20 +50,28 @@ jobs:
               return False
 
           def get_image_stable(prompt, idx):
-              # We check for all possible naming patterns you have right now
+              filename = f"img_{idx}.jpg"
+              # Checking all potential naming patterns found in your GitHub
               search_patterns = [
+                  f"assets/Scene_0110_2105_{idx}.png",
+                  f"Scene_0110_2105_{idx}.png",
                   f"assets/Scene_0110_0452_{idx}.png",
-                  f"Copy of =Scene_0110_0452_{idx}.png", # Matches your screenshot
-                  f"Copy of =Scene_0110_0452_{idx} (1).png",
-                  f"Scene_0110_0452_{idx}.png"
+                  f"Scene_0110_0452_{idx}.png",
+                  f"Copy of =Scene_0110_0452_{idx}.png",
+                  f"Copy of =Scene_0110_2105_{idx}.png"
               ]
               
+              # Loop through patterns and return the first one that exists
               for path in search_patterns:
                   if os.path.exists(path):
-                      print(f"Success! Found: {path}")
+                      print(f"Match found: {path}")
                       return path
               
-              # Fallback if no local file matches
+              # If no local file matches, use AI as a safety net
+              clean_p = re.sub(r'^\d+[\.\s\-]+', '', prompt.strip())
+              refined_prompt = urllib.parse.quote(f"8k cinematic luxury, {clean_p}")
+              url = f"https://pollinations.ai/p/{refined_prompt}?width=1080&height=1920&model=flux&seed={idx+500}"
+              if download_file(url, filename): return filename
               return None
 
           # EXECUTION
