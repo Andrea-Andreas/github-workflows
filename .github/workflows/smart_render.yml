@@ -61,17 +61,17 @@ jobs:
                   f"Copy of =Scene_0110_2105_{idx}.png"
               ]
               
-              # Loop through patterns and return the first one that exists
               for path in search_patterns:
                   if os.path.exists(path):
-                      print(f"Match found: {path}")
                       return path
               
               # If no local file matches, use AI as a safety net
-              clean_p = re.sub(r'^\d+[\.\s\-]+', '', prompt.strip())
-              refined_prompt = urllib.parse.quote(f"8k cinematic luxury, {clean_p}")
-              url = f"https://pollinations.ai/p/{refined_prompt}?width=1080&height=1920&model=flux&seed={idx+500}"
-              if download_file(url, filename): return filename
+              if prompt:
+                  clean_p = re.sub(r'^\d+[\.\s\-]+', '', prompt.strip())
+                  refined_prompt = urllib.parse.quote(f"8k cinematic luxury, {clean_p}")
+                  url = f"https://pollinations.ai/p/{refined_prompt}?width=1080&height=1920&model=flux&seed={idx+500}"
+                  if download_file(url, filename): return filename
+              
               return None
 
           # EXECUTION
@@ -84,42 +84,11 @@ jobs:
               if not audio_id_match: sys.exit(1)
               get_audio(audio_id_match.group(1), "audio.mp3")
               audio = AudioFileClip("audio.mp3")
-              dur = audio.duration / len(prompts)
+              
+              # Set slide duration (e.g., 3 seconds per image)
+              slide_dur = 3.0
+              num_slides = int(audio.duration / slide_dur) + 1
               
               clips = []
-              for i, p in enumerate(prompts):
-                  img_path = get_image_stable(p, i)
-                  if img_path:
-                      bg = ImageClip(img_path).set_duration(dur).set_fps(24)
-                      scene = bg.resize(lambda t: 1 + 0.04 * t) 
-                      clips.append(scene)
-              
-              if clips:
-                  final = concatenate_videoclips(clips, method="compose").set_audio(audio)
-                  final.write_videofile("final_video.mp4", codec="libx264", audio_codec="aac", fps=24, threads=4, preset='ultrafast')
-                  print("RENDER_SUCCESS")
-              else: sys.exit(1)
-          except Exception as e:
-              print(f"Error: {e}")
-              sys.exit(1)
-
-      - name: Create Release
-        id: create_release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: daily-${{ github.run_id }}
-          name: Video Build ${{ github.run_id }}
-          files: final_video.mp4
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Callback n8n
-        run: |
-          TAG="daily-${{ github.run_id }}"
-          FILE="final_video.mp4"
-          VIDEO_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/${FILE}"
-          
-          curl -X POST "${{ github.event.client_payload.callback_url }}" \
-          -H "Content-Type: application/json" \
-          -H "Authorization: Bearer ${{ secrets.N8N_API_KEY }}" \
-          -d "{\"status\": \"finished\", \"video_url\": \"${VIDEO_URL}\", \"file_name\": \"${FILE}\"}"
+              for i in range(num_slides):
+                  # Calculate index for prompts (looping)
