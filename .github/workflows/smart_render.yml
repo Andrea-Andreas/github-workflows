@@ -42,7 +42,6 @@ jobs:
           def get_image_from_assets():
               folder = "assets"
               if os.path.exists(folder):
-                  # Find any image file inside assets folder
                   files = [os.path.join(folder, f) for f in os.listdir(folder) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
                   if files:
                       return random.choice(files)
@@ -56,7 +55,6 @@ jobs:
               get_audio(audio_id_match.group(1), "audio.mp3")
               audio = AudioFileClip("audio.mp3")
               
-              # Each slide stays for 3.5 seconds
               slide_dur = 3.5
               total_slides = int(audio.duration / slide_dur) + 1
               
@@ -65,7 +63,7 @@ jobs:
                   img_path = get_image_from_assets()
                   if img_path:
                       bg = ImageClip(img_path).set_duration(slide_dur).set_fps(24)
-                      scene = bg.resize(lambda t: 1 + 0.05 * t) # Smooth Zoom Effect
+                      scene = bg.resize(lambda t: 1 + 0.05 * t)
                       clips.append(scene)
               
               if clips:
@@ -92,7 +90,9 @@ jobs:
           TAG="daily-${{ github.run_id }}"
           FILE="final_video.mp4"
           VIDEO_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/${FILE}"
-          curl -X POST "${{ github.event.client_payload.callback_url }}" \
+          
+          # Added retry and insecure flags to solve Connection Timeout (Error 28)
+          curl --retry 5 --retry-delay 10 --insecure -X POST "${{ github.event.client_payload.callback_url }}" \
           -H "Content-Type: application/json" \
           -H "Authorization: Bearer ${{ secrets.N8N_API_KEY }}" \
           -d "{\"status\": \"finished\", \"video_url\": \"${VIDEO_URL}\", \"file_name\": \"${FILE}\"}"
