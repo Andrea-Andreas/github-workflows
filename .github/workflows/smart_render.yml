@@ -40,78 +40,26 @@ jobs:
                   return os.path.exists(dest) and os.path.getsize(dest) > 1000
               except: return False
 
-          try:
-              # MANDATORY: Get the actual spoken script from n8n [cite: 2026-01-26]
-              spoken_content = """${{ github.event.client_payload.script_text }}"""
-              
-              # Fallback only if n8n fails to send script_text
-              if len(spoken_content) < 10:
-                  spoken_content = "${{ github.event.client_payload.visual_prompts }}".replace("|", " ")
+          def get_random_asset(folder, extensions):
+              if os.path.exists(folder):
+                  files = [os.path.join(folder, f) for f in os.listdir(folder) if f.lower().endswith(extensions) and 'keep' not in f]
+                  if files: return random.choice(files)
+              return None
 
-              # Break text into small 3-4 word chunks for high-speed sync [cite: 2026-01-26]
-              words = spoken_content.split()
-              chunk_size = 4 
+          try:
+              # Input data from n8n payload
+              full_script = """${{ github.event.client_payload.script_text }}"""
+              if len(full_script) < 10:
+                  full_script = "${{ github.event.client_payload.visual_prompts }}".replace("|", " ")
+              
+              # Word-for-word sync logic: 4 words per segment
+              words = full_script.split()
+              chunk_size = 4
               caption_chunks = [" ".join(words[i:i + chunk_size]) for i in range(0, len(words), chunk_size)]
 
-              # Audio Setup
               audio_url = "${{ github.event.client_payload.audio_url }}"
               audio_id = re.search(r'id=([a-zA-Z0-9_-]+)', audio_url)
               if not audio_id: sys.exit(1)
-              get_audio(audio_id.group(1), "voice.mp3")
+              
+              if not get_audio(audio_id.group(1), "voice.mp3"): sys.exit(1)
               voice = AudioFileClip("voice.mp3")
-              
-              # Music Setup [cite: 2026-01-26]
-              m_folder = "music"
-              m_files = [os.path.join(m_folder, f) for f in os.listdir(m_folder) if f.lower().endswith(".mp3")]
-              if m_files:
-                  bg_m = AudioFileClip(random.choice(m_files)).volumex(0.10).set_duration(voice.duration)
-                  final_audio = CompositeAudioClip([voice, bg_m])
-              else:
-                  final_audio = voice
-
-              # Syncing timing: Audio Duration divided by number of text chunks [cite: 2026-01-26]
-              chunk_dur = voice.duration / len(caption_chunks)
-              clips = []
-              img_folder = "assets"
-              images = [os.path.join(img_folder, f) for f in os.listdir(img_folder) if f.lower().endswith((".png", ".jpg"))]
-
-              for i, txt in enumerate(caption_chunks):
-                  img_p = random.choice(images) if images else None
-                  if img_p:
-                      bg_img = ImageClip(img_p).set_duration(chunk_dur).set_fps(24).resize(lambda t: 1 + 0.04 * t)
-                      
-                      # Yellow Subtitles with ARIBLK.TTF [cite: 2026-01-26]
-                      txt_clip = TextClip(txt, fontsize=75, color='yellow', font='ARIBLK.TTF', 
-                                         stroke_color='black', stroke_width=2.5, method='caption', 
-                                         size=(bg_img.w*0.85, None)).set_duration(chunk_dur).set_position(('center', bg_img.h*0.78))
-                      
-                      clips.append(CompositeVideoClip([bg_img, txt_clip]))
-              
-              if clips:
-                  final_vid = concatenate_videoclips(clips, method="compose").set_audio(final_audio).set_duration(voice.duration)
-                  final_vid.write_videofile("final_video.mp4", codec="libx264", audio_codec="aac", fps=24, threads=4, preset='ultrafast')
-              else:
-                  sys.exit(1)
-                  
-          except Exception as e:
-              print(f"Error: {e}")
-              sys.exit(1)
-
-      - name: Create Release
-        id: create_release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: daily-${{ github.run_id }}
-          name: Video Build ${{ github.run_id }}
-          files: final_video.mp4
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Callback n8n
-        run: |
-          TAG="daily-${{ github.run_id }}"
-          URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/final_video.mp4"
-          curl --retry 5 --retry-delay 10 --insecure -X POST "${{ github.event.client_payload.callback_url }}" \
-          -H "Content-Type: application/json" \
-          -H "Authorization: Bearer ${{ secrets.N8N_API_KEY }}" \
-          -d "{\"status\": \"finished\", \"video_url\": \"${URL}\"}"
