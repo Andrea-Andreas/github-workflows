@@ -51,7 +51,7 @@ jobs:
 
           def get_image_stable(prompt, idx):
               filename = f"img_{idx}.jpg"
-              # Checking all potential naming patterns found in your GitHub
+              # Search patterns for your uploaded files
               search_patterns = [
                   f"assets/Scene_0110_2105_{idx}.png",
                   f"Scene_0110_2105_{idx}.png",
@@ -65,13 +65,11 @@ jobs:
                   if os.path.exists(path):
                       return path
               
-              # If no local file matches, use AI as a safety net
-              if prompt:
-                  clean_p = re.sub(r'^\d+[\.\s\-]+', '', prompt.strip())
-                  refined_prompt = urllib.parse.quote(f"8k cinematic luxury, {clean_p}")
-                  url = f"https://pollinations.ai/p/{refined_prompt}?width=1080&height=1920&model=flux&seed={idx+500}"
-                  if download_file(url, filename): return filename
-              
+              # AI Fallback to prevent Exit Code 1
+              clean_p = re.sub(r'^\d+[\.\s\-]+', '', str(prompt).strip())
+              refined_prompt = urllib.parse.quote(f"8k cinematic luxury, {clean_p}")
+              url = f"https://pollinations.ai/p/{refined_prompt}?width=1080&height=1920&model=flux&seed={idx+777}"
+              if download_file(url, filename): return filename
               return None
 
           # EXECUTION
@@ -85,10 +83,47 @@ jobs:
               get_audio(audio_id_match.group(1), "audio.mp3")
               audio = AudioFileClip("audio.mp3")
               
-              # Set slide duration (e.g., 3 seconds per image)
+              # Calculate slides to cover the full duration
               slide_dur = 3.0
-              num_slides = int(audio.duration / slide_dur) + 1
+              total_slides = int(audio.duration / slide_dur) + 1
               
               clips = []
-              for i in range(num_slides):
-                  # Calculate index for prompts (looping)
+              for i in range(total_slides):
+                  p_idx = i % len(prompts) if prompts else 0
+                  current_prompt = prompts[p_idx] if prompts else "Cinematic luxury"
+                  
+                  img_path = get_image_stable(current_prompt, i)
+                  if img_path:
+                      bg = ImageClip(img_path).set_duration(slide_dur).set_fps(24)
+                      scene = bg.resize(lambda t: 1 + 0.04 * t) 
+                      clips.append(scene)
+              
+              if clips:
+                  final = concatenate_videoclips(clips, method="compose").set_audio(audio).set_duration(audio.duration)
+                  final.write_videofile("final_video.mp4", codec="libx264", audio_codec="aac", fps=24, threads=4, preset='ultrafast')
+                  print("RENDER_SUCCESS")
+              else: sys.exit(1)
+          except Exception as e:
+              print(f"Error: {e}")
+              sys.exit(1)
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: daily-${{ github.run_id }}
+          name: Video Build ${{ github.run_id }}
+          files: final_video.mp4
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Callback n8n
+        run: |
+          TAG="daily-${{ github.run_id }}"
+          FILE="final_video.mp4"
+          VIDEO_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/${FILE}"
+          
+          curl -X POST "${{ github.event.client_payload.callback_url }}" \
+          -H "Content-Type: application/json" \
+          -H "Authorization: Bearer ${{ secrets.N8N_API_KEY }}" \
+          -d "{\"status\": \"finished\", \"video_url\": \"${VIDEO_URL}\", \"file_name\": \"${FILE}\"}"
