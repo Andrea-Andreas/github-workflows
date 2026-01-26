@@ -39,70 +39,40 @@ jobs:
                   return os.path.exists(dest) and os.path.getsize(dest) > 1000
               except: return False
 
-          def get_random_local_image():
+          def get_image_from_assets():
               folder = "assets"
-              # Get all images from assets folder or root if assets is missing
-              all_files = []
               if os.path.exists(folder):
-                  all_files = [os.path.join(folder, f) for f in os.listdir(folder) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
-              
-              if not all_files:
-                  all_files = [f for f in os.listdir('.') if f.lower().endswith(('.png', '.jpg')) and 'img_' not in f]
-              
-              if all_files:
-                  return random.choice(all_files)
-              return None
-
-          def download_ai_fallback(prompt, idx):
-              filename = f"img_fallback_{idx}.jpg"
-              clean_p = re.sub(r'^\d+[\.\s\-]+', '', str(prompt).strip())
-              refined_prompt = urllib.parse.quote(f"8k cinematic luxury, {clean_p}")
-              url = f"https://pollinations.ai/p/{refined_prompt}?width=1080&height=1920&model=flux&seed={idx+888}"
-              
-              try:
-                  r = requests.get(url, timeout=20)
-                  if r.status_code == 200:
-                      with open(filename, "wb") as f: f.write(r.content)
-                      return filename
-              except: pass
+                  # Find any image file inside assets folder
+                  files = [os.path.join(folder, f) for f in os.listdir(folder) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+                  if files:
+                      return random.choice(files)
               return None
 
           try:
-              raw_prompts = "${{ github.event.client_payload.visual_prompts }}"
-              prompts = [p.strip() for p in raw_prompts.split('|') if len(p.strip()) > 5]
               audio_url = "${{ github.event.client_payload.audio_url }}"
               audio_id_match = re.search(r'id=([a-zA-Z0-9_-]+)', audio_url)
-              
               if not audio_id_match: sys.exit(1)
+              
               get_audio(audio_id_match.group(1), "audio.mp3")
               audio = AudioFileClip("audio.mp3")
               
-              # Configuration: Each random image stays for 3.2 seconds
-              slide_dur = 3.2
+              # Each slide stays for 3.5 seconds
+              slide_dur = 3.5
               total_slides = int(audio.duration / slide_dur) + 1
               
               clips = []
               for i in range(total_slides):
-                  # Step 1: Try to get a random image from your folder
-                  img_path = get_random_local_image()
-                  
-                  # Step 2: If no local images exist at all, use AI
-                  if not img_path:
-                      p_idx = i % len(prompts) if prompts else 0
-                      current_p = prompts[p_idx] if prompts else "luxury cinematic"
-                      img_path = download_ai_fallback(current_p, i)
-                  
+                  img_path = get_image_from_assets()
                   if img_path:
                       bg = ImageClip(img_path).set_duration(slide_dur).set_fps(24)
-                      scene = bg.resize(lambda t: 1 + 0.05 * t) # Smooth zoom
+                      scene = bg.resize(lambda t: 1 + 0.05 * t) # Smooth Zoom Effect
                       clips.append(scene)
               
               if clips:
                   final = concatenate_videoclips(clips, method="compose").set_audio(audio).set_duration(audio.duration)
                   final.write_videofile("final_video.mp4", codec="libx264", audio_codec="aac", fps=24, threads=4, preset='ultrafast')
                   print("RENDER_SUCCESS")
-              else:
-                  sys.exit(1)
+              else: sys.exit(1)
           except Exception as e:
               print(f"Error: {e}")
               sys.exit(1)
