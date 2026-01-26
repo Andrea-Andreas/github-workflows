@@ -47,22 +47,63 @@ jobs:
               return None
 
           try:
-              # Script handling for perfect sync
-              full_script = "${{ github.event.client_payload.script_text }}"
-              if not full_script or len(full_script) < 10:
-                  full_script = "${{ github.event.client_payload.visual_prompts }}".replace("|", " ")
+              script = "${{ github.event.client_payload.script_text }}"
+              if not script or len(script) < 5:
+                  script = "${{ github.event.client_payload.visual_prompts }}".replace("|", " ")
               
-              # Split script into small chunks for word-by-word feel
-              words = full_script.split()
+              words = script.split()
               chunk_size = 4
-              caption_chunks = [" ".join(words[i:i + chunk_size]) for i in range(0, len(words), chunk_size)]
+              chunks = [" ".join(words[i:i + chunk_size]) for i in range(0, len(words), chunk_size)]
 
               audio_url = "${{ github.event.client_payload.audio_url }}"
-              audio_id_match = re.search(r'id=([a-zA-Z0-9_-]+)', audio_url)
-              if not audio_id_match: sys.exit(1)
+              audio_id = re.search(r'id=([a-zA-Z0-9_-]+)', audio_url)
+              if not audio_id: sys.exit(1)
               
-              get_audio(audio_id_match.group(1), "voice.mp3")
+              get_audio(audio_id.group(1), "voice.mp3")
               voice = AudioFileClip("voice.mp3")
               
-              # Background Music
-              bg_music_path
+              bg_path = get_random_asset("music", ".mp3")
+              if bg_path:
+                  bg_m = AudioFileClip(bg_path).volumex(0.10).set_duration(voice.duration)
+                  final_audio = CompositeAudioClip([voice, bg_m])
+              else:
+                  final_audio = voice
+
+              dur = voice.duration / len(chunks) if chunks else 3.5
+              clips = []
+              font_f = 'ARIBLK.TTF'
+
+              for i, txt_content in enumerate(chunks):
+                  img_p = get_random_asset("assets", (".png", ".jpg", ".jpeg"))
+                  if img_p:
+                      bg_img = ImageClip(img_p).set_duration(dur).set_fps(24).resize(lambda t: 1 + 0.04 * t)
+                      txt_clip = TextClip(txt_content, fontsize=75, color='yellow', font=font_f, stroke_color='black', stroke_width=2.5, method='caption', size=(bg_img.w*0.85, None)).set_duration(dur).set_position(('center', bg_img.h*0.78))
+                      scene = CompositeVideoClip([bg_img, txt_clip])
+                      clips.append(scene)
+              
+              if clips:
+                  final_vid = concatenate_videoclips(clips, method="compose").set_audio(final_audio).set_duration(voice.duration)
+                  final_vid.write_videofile("final_video.mp4", codec="libx264", audio_codec="aac", fps=24, threads=4, preset='ultrafast')
+              else: sys.exit(1)
+          except Exception as e:
+              print(f"Error: {e}")
+              sys.exit(1)
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: daily-${{ github.run_id }}
+          name: Video Build ${{ github.run_id }}
+          files: final_video.mp4
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Callback n8n
+        run: |
+          TAG="daily-${{ github.run_id }}"
+          URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/final_video.mp4"
+          curl --retry 5 --retry-delay 10 --insecure -X POST "${{ github.event.client_payload.callback_url }}" \
+          -H "Content-Type: application/json" \
+          -H "Authorization: Bearer ${{ secrets.N8N_API_KEY }}" \
+          -d "{\"status\": \"finished\", \"video_url\": \"${URL}\"}"
