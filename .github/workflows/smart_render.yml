@@ -23,7 +23,7 @@ jobs:
       - name: Video_Rendering
         shell: python
         run: |
-          import os, requests, re, urllib.parse, sys, random
+          import os, requests, re, sys, random
           from moviepy.editor import AudioFileClip, ImageClip, concatenate_videoclips, TextClip, CompositeVideoClip
           from moviepy.audio.AudioClip import CompositeAudioClip
 
@@ -40,21 +40,18 @@ jobs:
                   return os.path.exists(dest) and os.path.getsize(dest) > 1000
               except: return False
 
-          def get_random_asset(folder, extensions):
-              if os.path.exists(folder):
-                  files = [os.path.join(folder, f) for f in os.listdir(folder) if f.lower().endswith(extensions) and 'keep' not in f]
-                  if files: return random.choice(files)
-              return None
-
           try:
-              script = "${{ github.event.client_payload.script_text }}"
-              if not script or len(script) < 5:
-                  script = "${{ github.event.client_payload.visual_prompts }}".replace("|", " ")
+              # Strict Command: Use script_text for word-sync subtitles
+              full_text = """${{ github.event.client_payload.script_text }}"""
+              if len(full_text) < 10:
+                  full_text = "${{ github.event.client_payload.visual_prompts }}".replace("|", " ")
               
-              words = script.split()
-              chunk_size = 4
-              chunks = [" ".join(words[i:i + chunk_size]) for i in range(0, len(words), chunk_size)]
+              # Processing text into small chunks for professional sync
+              words = full_text.split()
+              chunk_size = 4 
+              caption_chunks = [" ".join(words[i:i + chunk_size]) for i in range(0, len(words), chunk_size)]
 
+              # Audio Setup
               audio_url = "${{ github.event.client_payload.audio_url }}"
               audio_id = re.search(r'id=([a-zA-Z0-9_-]+)', audio_url)
               if not audio_id: sys.exit(1)
@@ -62,29 +59,43 @@ jobs:
               get_audio(audio_id.group(1), "voice.mp3")
               voice = AudioFileClip("voice.mp3")
               
-              bg_path = get_random_asset("music", ".mp3")
-              if bg_path:
-                  bg_m = AudioFileClip(bg_path).volumex(0.10).set_duration(voice.duration)
+              # Music Selection from 'music' folder
+              music_folder = "music"
+              m_files = [os.path.join(music_folder, f) for f in os.listdir(music_folder) if f.lower().endswith(".mp3") and 'keep' not in f]
+              if m_files:
+                  bg_m = AudioFileClip(random.choice(m_files)).volumex(0.10).set_duration(voice.duration)
                   final_audio = CompositeAudioClip([voice, bg_m])
               else:
                   final_audio = voice
 
-              dur = voice.duration / len(chunks) if chunks else 3.5
+              # Timing calculation
+              chunk_dur = voice.duration / len(caption_chunks)
               clips = []
-              font_f = 'ARIBLK.TTF'
+              
+              # Asset folders
+              img_folder = "assets"
+              images = [os.path.join(img_folder, f) for f in os.listdir(img_folder) if f.lower().endswith((".png", ".jpg", ".jpeg"))]
 
-              for i, txt_content in enumerate(chunks):
-                  img_p = get_random_asset("assets", (".png", ".jpg", ".jpeg"))
+              for i, txt in enumerate(caption_chunks):
+                  img_p = random.choice(images) if images else None
                   if img_p:
-                      bg_img = ImageClip(img_p).set_duration(dur).set_fps(24).resize(lambda t: 1 + 0.04 * t)
-                      txt_clip = TextClip(txt_content, fontsize=75, color='yellow', font=font_f, stroke_color='black', stroke_width=2.5, method='caption', size=(bg_img.w*0.85, None)).set_duration(dur).set_position(('center', bg_img.h*0.78))
-                      scene = CompositeVideoClip([bg_img, txt_clip])
-                      clips.append(scene)
+                      # Base image with zoom effect
+                      bg_img = ImageClip(img_p).set_duration(chunk_dur).set_fps(24).resize(lambda t: 1 + 0.04 * t)
+                      
+                      # Yellow subtitles with Arial Black font
+                      txt_clip = TextClip(txt, fontsize=75, color='yellow', font='ARIBLK.TTF', 
+                                         stroke_color='black', stroke_width=2.5, method='caption', 
+                                         size=(bg_img.w*0.85, None)).set_duration(chunk_dur).set_position(('center', bg_img.h*0.78))
+                      
+                      clips.append(CompositeVideoClip([bg_img, txt_clip]))
               
               if clips:
                   final_vid = concatenate_videoclips(clips, method="compose").set_audio(final_audio).set_duration(voice.duration)
                   final_vid.write_videofile("final_video.mp4", codec="libx264", audio_codec="aac", fps=24, threads=4, preset='ultrafast')
-              else: sys.exit(1)
+                  print("RENDER_SUCCESS")
+              else:
+                  sys.exit(1)
+                  
           except Exception as e:
               print(f"Error: {e}")
               sys.exit(1)
