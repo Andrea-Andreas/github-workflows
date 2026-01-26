@@ -24,7 +24,8 @@ jobs:
         shell: python
         run: |
           import os, requests, re, urllib.parse, sys, random
-          from moviepy.editor import AudioFileClip, ColorClip, ImageClip, concatenate_videoclips, CompositeVideoClip
+          from moviepy.editor import AudioFileClip, ImageClip, concatenate_videoclips, TextClip, CompositeVideoClip
+          from moviepy.audio.AudioClip import CompositeAudioClip
 
           def get_audio(id, dest):
               try:
@@ -39,36 +40,56 @@ jobs:
                   return os.path.exists(dest) and os.path.getsize(dest) > 1000
               except: return False
 
-          def get_image_from_assets():
-              folder = "assets"
+          def get_random_asset(folder, extensions):
               if os.path.exists(folder):
-                  files = [os.path.join(folder, f) for f in os.listdir(folder) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
-                  if files:
-                      return random.choice(files)
+                  files = [os.path.join(folder, f) for f in os.listdir(folder) if f.lower().endswith(extensions) and 'keep' not in f]
+                  if files: return random.choice(files)
               return None
 
           try:
+              # Data Setup
+              raw_prompts = "${{ github.event.client_payload.visual_prompts }}"
+              prompts = [p.strip() for p in raw_prompts.split('|') if len(p.strip()) > 5]
               audio_url = "${{ github.event.client_payload.audio_url }}"
               audio_id_match = re.search(r'id=([a-zA-Z0-9_-]+)', audio_url)
+              
               if not audio_id_match: sys.exit(1)
+              get_audio(audio_id_match.group(1), "voice.mp3")
+              voice = AudioFileClip("voice.mp3")
               
-              get_audio(audio_id_match.group(1), "audio.mp3")
-              audio = AudioFileClip("audio.mp3")
-              
-              slide_dur = 3.5
-              total_slides = int(audio.duration / slide_dur) + 1
-              
+              # Music Background Selection (Density & Time tracks)
+              bg_music_path = get_random_asset("music", ".mp3")
+              if bg_music_path:
+                  # Volume set to 0.10 for perfect balance with voice
+                  bg_music = AudioFileClip(bg_music_path).volumex(0.10).set_duration(voice.duration)
+                  final_audio = CompositeAudioClip([voice, bg_music])
+              else:
+                  final_audio = voice
+
+              # Timing calculation based on voice duration
+              slide_dur = 3.5 
+              total_slides = int(voice.duration / slide_dur) + 1
               clips = []
+              font_file = 'ARIBLK.TTF' 
+
               for i in range(total_slides):
-                  img_path = get_image_from_assets()
+                  img_path = get_random_asset("assets", (".png", ".jpg", ".jpeg"))
                   if img_path:
-                      bg = ImageClip(img_path).set_duration(slide_dur).set_fps(24)
-                      scene = bg.resize(lambda t: 1 + 0.05 * t)
+                      bg = ImageClip(img_path).set_duration(slide_dur).set_fps(24).resize(lambda t: 1 + 0.04 * t)
+                      
+                      # Text handling
+                      p_idx = i % len(prompts) if prompts else 0
+                      text_content = prompts[p_idx] if prompts else ""
+                      
+                      # Styling: Yellow text, Arial Black font, Black outline
+                      txt = TextClip(text_content, fontsize=70, color='yellow', font=font_file, stroke_color='black', stroke_width=2.5, method='caption', size=(bg.w*0.85, None)).set_duration(slide_dur).set_position(('center', bg.h*0.78))
+                      
+                      scene = CompositeVideoClip([bg, txt])
                       clips.append(scene)
               
               if clips:
-                  final = concatenate_videoclips(clips, method="compose").set_audio(audio).set_duration(audio.duration)
-                  final.write_videofile("final_video.mp4", codec="libx264", audio_codec="aac", fps=24, threads=4, preset='ultrafast')
+                  final_video = concatenate_videoclips(clips, method="compose").set_audio(final_audio).set_duration(voice.duration)
+                  final_video.write_videofile("final_video.mp4", codec="libx264", audio_codec="aac", fps=24, threads=4, preset='ultrafast')
                   print("RENDER_SUCCESS")
               else: sys.exit(1)
           except Exception as e:
@@ -88,11 +109,8 @@ jobs:
       - name: Callback n8n
         run: |
           TAG="daily-${{ github.run_id }}"
-          FILE="final_video.mp4"
-          VIDEO_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/${FILE}"
-          
-          # Added retry and insecure flags to solve Connection Timeout (Error 28)
+          VIDEO_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/final_video.mp4"
           curl --retry 5 --retry-delay 10 --insecure -X POST "${{ github.event.client_payload.callback_url }}" \
           -H "Content-Type: application/json" \
           -H "Authorization: Bearer ${{ secrets.N8N_API_KEY }}" \
-          -d "{\"status\": \"finished\", \"video_url\": \"${VIDEO_URL}\", \"file_name\": \"${FILE}\"}"
+          -d "{\"status\": \"finished\", \"video_url\": \"${VIDEO_URL}\", \"title\": \"${{ github.event.client_payload.video_title }}\"}"
