@@ -78,7 +78,7 @@ jobs:
               font_path = 'ARIBLK.TTF' 
 
               for txt in chunks:
-                  img = get_random_asset("assets", (".png", ".jpg", ".jpeg"))
+                  img = get_random_asset("access_instagram", (".png", ".jpg", ".jpeg"))
                   if img:
                       # Time Calculation preserved from successful skeleton
                       char_weight = len(txt) / total_chars
