@@ -1,1 +1,125 @@
+name: Viral_Video_v33_FB_Reels_Stable
+on:
+  repository_dispatch:
+    types: [facebook_render]
 
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install_Tools
+        run: |
+          sudo apt-get update && sudo apt-get install -y ffmpeg imagemagick
+          sudo find /etc/ImageMagick* -name "policy.xml" -exec sed -i 's/policy domain="path" rights="none" pattern="@\*"/policy domain="path" rights="read|write" pattern="@\*"/g' {} +
+          pip install "Pillow<10.0.0" moviepy==1.0.3 requests opencv-python-headless "imageio[pyav]" imageio-ffmpeg
+
+      - name: Video_Rendering
+        shell: python
+        run: |
+          import os, requests, re, sys, random, time
+          from moviepy.editor import AudioFileClip, ImageClip, concatenate_videoclips, TextClip, CompositeVideoClip
+          from moviepy.audio.AudioClip import CompositeAudioClip
+
+          def get_audio(id, dest):
+              try:
+                  url = f"https://docs.google.com/uc?export=download&id={id}"
+                  s = requests.Session()
+                  r = s.get(url, stream=True)
+                  t = next((v for k, v in r.cookies.items() if k.startswith('download_warning')), None)
+                  if t: r = s.get(url, params={'id': id, 'confirm': t}, stream=True)
+                  with open(dest, "wb") as f:
+                      for c in r.iter_content(32768):
+                          if c: f.write(c)
+                  return os.path.exists(dest) and os.path.getsize(dest) > 1000
+              except Exception as e:
+                  print(f"Download Error: {e}")
+                  return False
+
+          def get_random_asset(folder, extensions):
+              if os.path.exists(folder):
+                  files = [os.path.join(folder, f) for f in os.listdir(folder) if f.lower().endswith(extensions) and 'keep' not in f]
+                  if files: return random.choice(files)
+              return None
+
+          try:
+              script_text = """${{ github.event.client_payload.script_text }}"""
+              visual_prompts = "${{ github.event.client_payload.visual_prompts }}"
+              audio_url = "${{ github.event.client_payload.audio_url }}"
+              
+              final_text = script_text if len(script_text) > 10 else visual_prompts.replace("|", " ")
+              words = final_text.split()
+              chunk_size = 4
+              chunks = [" ".join(words[i:i + chunk_size]) for i in range(0, len(words), chunk_size)]
+
+              audio_id_match = re.search(r'id=([a-zA-Z0-9_-]+)', audio_url)
+              if not audio_id_match: sys.exit(1)
+              
+              if not get_audio(audio_id_match.group(1), "voice.mp3"): sys.exit(1)
+              voice = AudioFileClip("voice.mp3")
+              
+              bg_music_path = get_random_asset("music", ".mp3")
+              if bg_music_path:
+                  bg_music = AudioFileClip(bg_music_path).volumex(0.10).set_duration(voice.duration)
+                  final_audio = CompositeAudioClip([voice, bg_music])
+              else:
+                  final_audio = voice
+
+              # Strict Sync Logic - Character Weighting
+              total_chars = sum(len(c) for c in chunks)
+              clips = []
+              font_path = 'ARIBLK.TTF' 
+
+              for txt in chunks:
+                  img = get_random_asset("assets", (".png", ".jpg", ".jpeg"))
+                  if img:
+                      char_weight = len(txt) / total_chars
+                      duration_per_chunk = char_weight * voice.duration
+                      
+                      # FB Reels Dimensions (1080x1920)
+                      bg = ImageClip(img).set_duration(duration_per_chunk).set_fps(24).resize(height=1920)
+                      bg = bg.crop(x_center=bg.w/2, y_center=bg.h/2, width=1080, height=1920)
+                      bg = bg.resize(lambda t: 1 + 0.04 * t) 
+                      
+                      # Subtitle: Placed at 68% height to avoid FB UI overlays
+                      subtitle = TextClip(txt, fontsize=75, color='yellow', font=font_path, 
+                                          stroke_color='black', stroke_width=2.5, method='caption', 
+                                          size=(1080*0.82, None)).set_duration(duration_per_chunk).set_position(('center', 1920*0.68))
+                      
+                      clips.append(CompositeVideoClip([bg, subtitle], size=(1080, 1920)))
+              
+              if clips:
+                  final_video = concatenate_videoclips(clips, method="compose").set_audio(final_audio).set_duration(voice.duration)
+                  # Encoding optimized for Facebook standard
+                  final_video.write_videofile("final_video.mp4", codec="libx264", audio_codec="aac", fps=24, threads=4, preset='ultrafast')
+                  print("SUCCESS")
+              else: sys.exit(1)
+
+          except Exception as e:
+              print(f"Critical Error: {e}")
+              sys.exit(1)
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: daily-${{ github.run_id }}
+          name: FB Reels Sync Build ${{ github.run_id }}
+          files: final_video.mp4
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Callback n8n
+        run: |
+          TAG="daily-${{ github.run_id }}"
+          URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/final_video.mp4"
+          curl --retry 5 --retry-delay 10 --insecure -X POST "${{ github.event.client_payload.callback_url }}" \
+          -H "Content-Type: application/json" \
+          -H "Authorization: Bearer ${{ secrets.N8N_API_KEY }}" \
+          -d "{\"status\": \"finished\", \"video_url\": \"${URL}\"}"
