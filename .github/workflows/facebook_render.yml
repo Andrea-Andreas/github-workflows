@@ -77,7 +77,7 @@ jobs:
               font_path = 'ARIBLK.TTF' 
 
               for txt in chunks:
-                  img = get_random_asset("assets", (".png", ".jpg", ".jpeg"))
+                  img = get_random_asset("access_facebook", (".png", ".jpg", ".jpeg"))
                   if img:
                       char_weight = len(txt) / total_chars
                       duration_per_chunk = char_weight * voice.duration
