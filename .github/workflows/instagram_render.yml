@@ -1,4 +1,4 @@
-name: Viral_Video_v33_Stable_Base
+name: Viral_Video_v33_Reels_Sync_Master
 on:
   repository_dispatch:
     types: [instagram_render]
@@ -54,6 +54,7 @@ jobs:
               audio_url = "${{ github.event.client_payload.audio_url }}"
               
               final_text = script_text if len(script_text) > 10 else visual_prompts.replace("|", " ")
+              
               words = final_text.split()
               chunk_size = 4
               chunks = [" ".join(words[i:i + chunk_size]) for i in range(0, len(words), chunk_size)]
@@ -71,25 +72,55 @@ jobs:
               else:
                   final_audio = voice
 
+              # Original High-Precision Sync Logic
               total_chars = sum(len(c) for c in chunks)
               clips = []
               font_path = 'ARIBLK.TTF' 
 
-              # --- Instagram Resize (The Only Change) ---
-              target_w, target_h = 1080, 1920
-
               for txt in chunks:
                   img = get_random_asset("assets", (".png", ".jpg", ".jpeg"))
                   if img:
+                      # Time Calculation preserved from successful skeleton
                       char_weight = len(txt) / total_chars
                       duration_per_chunk = char_weight * voice.duration
                       
-                      # Vertical Scaling for Instagram
-                      bg = ImageClip(img).set_duration(duration_per_chunk).set_fps(24).resize(height=target_h)
-                      bg = bg.set_position('center').resize(lambda t: 1 + 0.04 * t)
+                      # Reels Visual Frame (1080x1920)
+                      bg = ImageClip(img).set_duration(duration_per_chunk).set_fps(24).resize(height=1920)
+                      bg = bg.crop(x_center=bg.w/2, y_center=bg.h/2, width=1080, height=1920)
+                      bg = bg.resize(lambda t: 1 + 0.04 * t) # Smooth Zoom
                       
+                      # Subtitle: Optimized for Instagram Safe Zones
                       subtitle = TextClip(txt, fontsize=75, color='yellow', font=font_path, 
-                                         stroke_color='black', stroke_width=2.5, method='caption', 
-                                         size=(target_w*0.85, None)).set_duration(duration_per_chunk).set_position(('center', target_h*0.78))
+                                          stroke_color='black', stroke_width=2.5, method='caption', 
+                                          size=(1080*0.85, None)).set_duration(duration_per_chunk).set_position(('center', 1920*0.70))
                       
-                      clips.append(CompositeVideoClip([bg, subtitle], size=(target_
+                      clips.append(CompositeVideoClip([bg, subtitle], size=(1080, 1920)))
+              
+              if clips:
+                  final_video = concatenate_videoclips(clips, method="compose").set_audio(final_audio).set_duration(voice.duration)
+                  final_video.write_videofile("final_video.mp4", codec="libx264", audio_codec="aac", fps=24, threads=4, preset='ultrafast')
+                  print("SUCCESS")
+              else: sys.exit(1)
+
+          except Exception as e:
+              print(f"Critical Error: {e}")
+              sys.exit(1)
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: daily-${{ github.run_id }}
+          name: Reels Sync Build ${{ github.run_id }}
+          files: final_video.mp4
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Callback n8n
+        run: |
+          TAG="daily-${{ github.run_id }}"
+          URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/final_video.mp4"
+          curl --retry 5 --retry-delay 10 --insecure -X POST "${{ github.event.client_payload.callback_url }}" \
+          -H "Content-Type: application/json" \
+          -H "Authorization: Bearer ${{ secrets.N8N_API_KEY }}" \
+          -d "{\"status\": \"finished\", \"video_url\": \"${URL}\"}"
