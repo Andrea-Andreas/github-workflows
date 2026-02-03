@@ -75,8 +75,6 @@ jobs:
               if bg_music_path:
                   from moviepy.editor import afx
                   bg_music = AudioFileClip(bg_music_path)
-                  
-               # Applied afx.loop to ensure the music covers the entire voice duration without crashing
                   bg_music = afx.loop(bg_music, duration=voice.duration).volumex(0.10)
                   
                   final_audio = CompositeAudioClip([voice, bg_music])
