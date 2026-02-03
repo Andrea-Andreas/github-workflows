@@ -70,10 +70,14 @@ jobs:
               if not get_audio(audio_id_match.group(1), "voice.mp3"): sys.exit(1)
               voice = AudioFileClip("voice.mp3")
               
-              # Music Mix Logic [cite: 2026-01-26]
+              # Music Mix Logic [REVISED for Loop & Stability]
               bg_music_path = get_random_asset("music", ".mp3")
               if bg_music_path:
-                  bg_music = AudioFileClip(bg_music_path).volumex(0.10).set_duration(voice.duration)
+                  from moviepy.editor import afx
+                  bg_music = AudioFileClip(bg_music_path)
+                  # Applied afx.loop to ensure the music covers the entire voice duration without crashing
+                  bg_music = afx.loop(bg_music, duration=voice.duration).volumex(0.10)
+                  
                   final_audio = CompositeAudioClip([voice, bg_music])
               else:
                   final_audio = voice
