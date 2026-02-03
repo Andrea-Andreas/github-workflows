@@ -24,10 +24,10 @@ jobs:
         shell: python
         run: |
           import os, requests, re, sys, random, time
-          from moviepy.editor import AudioFileClip, ImageClip, concatenate_videoclips, TextClip, CompositeVideoClip
+          from moviepy.editor import AudioFileClip, ImageClip, concatenate_videoclips, TextClip, CompositeVideoClip, vfx
           from moviepy.audio.AudioClip import CompositeAudioClip
+          from moviepy.audio.fx.all import loop as audio_loop
 
-          # Successful Skeleton Download Method [cite: 2026-01-26]
           def get_audio(id, dest):
               try:
                   url = f"https://docs.google.com/uc?export=download&id={id}"
@@ -50,85 +50,23 @@ jobs:
               return None
 
           try:
-              # Input Capture [cite: 2026-01-26]
               script_text = """${{ github.event.client_payload.script_text }}"""
               visual_prompts = "${{ github.event.client_payload.visual_prompts }}"
               audio_url = "${{ github.event.client_payload.audio_url }}"
               
-              # Priority logic for text
               final_text = script_text if len(script_text) > 10 else visual_prompts.replace("|", " ")
               
-              # Word chunks for captions
               words = final_text.split()
               chunk_size = 4
               chunks = [" ".join(words[i:i + chunk_size]) for i in range(0, len(words), chunk_size)]
 
-              # Audio Retrieval
               audio_id_match = re.search(r'id=([a-zA-Z0-9_-]+)', audio_url)
               if not audio_id_match: sys.exit(1)
               
               if not get_audio(audio_id_match.group(1), "voice.mp3"): sys.exit(1)
               voice = AudioFileClip("voice.mp3")
               
-              # Music Mix Logic [REVISED for Loop & Stability]
+              # Music Background Logic with Loop fix
               bg_music_path = get_random_asset("music", ".mp3")
               if bg_music_path:
-                  from moviepy.editor import afx
-                  bg_music = AudioFileClip(bg_music_path)
-                  bg_music = afx.loop(bg_music, duration=voice.duration).volumex(0.10)
-                  
-                  final_audio = CompositeAudioClip([voice, bg_music])
-              else:
-                  final_audio = voice
-
-              # Ultra-Sync Logic: Distribution by Character Count [cite: 2026-01-26]
-              total_chars = sum(len(c) for c in chunks)
-              clips = []
-              font_path = 'ARIBLK.TTF' # Root uploaded font [cite: 2026-01-26]
-
-              for txt in chunks:
-                  img = get_random_asset("assets", (".png", ".jpg", ".jpeg"))
-                  if img:
-                      # Time Calculation based on character weight
-                      char_weight = len(txt) / total_chars
-                      duration_per_chunk = char_weight * voice.duration
-                      
-                      # Successful Skeleton Visual: Smooth Zoom [cite: 2026-01-26]
-                      bg = ImageClip(img).set_duration(duration_per_chunk).set_fps(24).resize(lambda t: 1 + 0.04 * t)
-                      
-                      # Subtitle: Yellow, Stroke, Arial Black [cite: 2026-01-26]
-                      subtitle = TextClip(txt, fontsize=75, color='yellow', font=font_path, 
-                                         stroke_color='black', stroke_width=2.5, method='caption', 
-                                         size=(bg.w*0.85, None)).set_duration(duration_per_chunk).set_position(('center', bg.h*0.78))
-                      
-                      clips.append(CompositeVideoClip([bg, subtitle]))
-              
-              if clips:
-                  # Final Assembly and Optimization
-                  final_video = concatenate_videoclips(clips, method="compose").set_audio(final_audio).set_duration(voice.duration)
-                  final_video.write_videofile("final_video.mp4", codec="libx264", audio_codec="aac", fps=24, threads=4, preset='ultrafast')
-                  print("SUCCESS")
-              else: sys.exit(1)
-
-          except Exception as e:
-              print(f"Critical Error: {e}")
-              sys.exit(1)
-
-      - name: Create Release
-        id: create_release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: daily-${{ github.run_id }}
-          name: Video Build ${{ github.run_id }}
-          files: final_video.mp4
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Callback n8n
-        run: |
-          TAG="daily-${{ github.run_id }}"
-          URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/final_video.mp4"
-          curl --retry 5 --retry-delay 10 --insecure -X POST "${{ github.event.client_payload.callback_url }}" \
-          -H "Content-Type: application/json" \
-          -H "Authorization: Bearer ${{ secrets.N8N_API_KEY }}" \
-          -d "{\"status\": \"finished\", \"video_url\": \"${URL}\"}"
+                  bg_music = AudioFileClip(bg_music_path
