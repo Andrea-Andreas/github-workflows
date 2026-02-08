@@ -88,8 +88,8 @@ jobs:
                       # Successful Skeleton Effect: Smooth Zoom
                       bg = ImageClip(img).set_duration(duration_per_chunk).set_fps(24).resize(lambda t: 1 + 0.04 * t)
                       
-                      # Subtitle style: Yellow, Black Stroke, Arial Black
-                      subtitle = TextClip(txt, fontsize=75, color='yellow', font=font_path, 
+                      # Subtitle style: Red, Black Stroke, Arial Black
+                      subtitle = TextClip(txt, fontsize=75, color='red', font=font_path, 
                                          stroke_color='black', stroke_width=2.5, method='caption', 
                                          size=(bg.w*0.85, None)).set_duration(duration_per_chunk).set_position(('center', bg.h*0.78))
                       
